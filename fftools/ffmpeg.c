@@ -145,16 +145,19 @@ AVIOContext *progress_avio = NULL;
 
 static uint8_t *subtitle_out;
 
+//输入流和输入文件数组
 InputStream **input_streams = NULL;
 int        nb_input_streams = 0;
 InputFile   **input_files   = NULL;
 int        nb_input_files   = 0;
 
+//输出流和输出文件数组
 OutputStream **output_streams = NULL;
 int         nb_output_streams = 0;
 OutputFile   **output_files   = NULL;
 int         nb_output_files   = 0;
 
+//filter
 FilterGraph **filtergraphs;
 int        nb_filtergraphs;
 
@@ -724,6 +727,7 @@ static void close_all_output_streams(OutputStream *ost, OSTFinished this_stream,
     }
 }
 
+//muxer时间基转输出流时间基,调用av_interleaved_write_frame写到输出文件
 static void write_packet(OutputFile *of, AVPacket *pkt, OutputStream *ost, int unqueue)
 {
     AVFormatContext *s = of->ctx;
@@ -804,6 +808,7 @@ static void write_packet(OutputFile *of, AVPacket *pkt, OutputStream *ost, int u
         }
     }
 
+    //muxer时间基转输出流时间基
     av_packet_rescale_ts(pkt, ost->mux_timebase, ost->st->time_base);
 
     if (!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
@@ -891,6 +896,7 @@ static void close_output_stream(OutputStream *ost)
  * therefore flush any delayed packets to the output.  A blank packet
  * must be supplied in this case.
  */
+//调用write_packet写到输出文件,最终调用av_interleaved_write_frame
 static void output_packet(OutputFile *of, AVPacket *pkt,
                           OutputStream *ost, int eof)
 {
@@ -930,6 +936,7 @@ static int check_recording_time(OutputStream *ost)
     return 1;
 }
 
+//将frame time_base（从最后的filter中获取）转成编码器time_base
 static double adjust_frame_pts_to_encoder_tb(OutputFile *of, OutputStream *ost,
                                              AVFrame *frame)
 {
@@ -943,14 +950,17 @@ static double adjust_frame_pts_to_encoder_tb(OutputFile *of, OutputStream *ost,
         AVFilterContext *filter = ost->filter->filter;
 
         int64_t start_time = (of->start_time == AV_NOPTS_VALUE) ? 0 : of->start_time;
+        //从filter最后的输出获取time_base
         AVRational filter_tb = av_buffersink_get_time_base(filter);
         AVRational tb = enc->time_base;
         int extra_bits = av_clip(29 - av_log2(tb.den), 0, 16);
 
+        //经过一些计算，最终转成编码器time_base
         tb.den <<= extra_bits;
         float_pts =
             av_rescale_q(frame->pts, filter_tb, tb) -
             av_rescale_q(start_time, AV_TIME_BASE_Q, tb);
+        //做一些平滑处理，向小的时间基转换可能丢失精度
         float_pts /= 1 << extra_bits;
         // avoid exact midoints to reduce the chance of rounding differences, this can be removed in case the fps code is changed to work with integers
         float_pts += FFSIGN(float_pts) * 1.0 / (1<<17);
@@ -986,6 +996,7 @@ static int init_output_stream_wrapper(OutputStream *ost, AVFrame *frame,
     if (ost->initialized)
         return 0;
 
+    //初始化输出流，打开编码器
     ret = init_output_stream(ost, frame, error, sizeof(error));
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Error initializing output stream %d:%d -- %s\n",
@@ -1037,6 +1048,7 @@ static void do_audio_out(OutputFile *of, OutputStream *ost,
 
         update_benchmark("encode_audio %d.%d", ost->file_index, ost->index);
 
+        //将时间基转换成muxer的时间基
         av_packet_rescale_ts(pkt, enc->time_base, ost->mux_timebase);
 
         if (debug_ts) {
@@ -1139,6 +1151,13 @@ static void do_subtitle_out(OutputFile *of,
 }
 
 /* May modify/reset next_picture */
+//首先第一次会调用init_output_stream_wrapper写入header，然后编码数据，然后调用output_packet写入输出,
+//值的注意的是直到这里最终才会通过一层层调用，然后打开编码器av_codec_open2
+//video处理,通过一层层调用，最终调用avformat_write_header/av_interleaved_write_frame
+//注意里面会从filter中读取time_base,然后做调整,即将frame time_base（从最后的filter中获取）转成编码器time_base
+//并且编码后在将时间基转成成muxer时间基
+//最终输出时还需要转出输出流的时间基
+//filter.time_base -> encoder.time_base -> muxer.time_base -> out_stream.time_base
 static void do_video_out(OutputFile *of,
                          OutputStream *ost,
                          AVFrame *next_picture)
@@ -1155,7 +1174,11 @@ static void do_video_out(OutputFile *of,
     InputStream *ist = NULL;
     AVFilterContext *filter = ost->filter->filter;
 
+    //写入header，通过一层层调用，最终会调用avformat_write_header()
+    //值的注意的是直到这里最终才会通过一层层调用，然后打开编码器av_codec_open2
     init_output_stream_wrapper(ost, next_picture, 1);
+    //将frame time_base（从最后的filter中获取）转成编码器time_base
+    //从filter中获取time_base(filter有可能对time_base做了修改),调整pts time_base,
     sync_ipts = adjust_frame_pts_to_encoder_tb(of, ost, next_picture);
 
     if (ost->source_index >= 0)
@@ -1349,6 +1372,7 @@ static void do_video_out(OutputFile *of,
 
         ost->frames_encoded++;
 
+        //送入编码
         ret = avcodec_send_frame(enc, in_picture);
         if (ret < 0)
             goto error;
@@ -1356,6 +1380,7 @@ static void do_video_out(OutputFile *of,
         av_frame_remove_side_data(in_picture, AV_FRAME_DATA_A53_CC);
 
         while (1) {
+            //从编码器读取packet
             ret = avcodec_receive_packet(enc, pkt);
             update_benchmark("encode_video %d.%d", ost->file_index, ost->index);
             if (ret == AVERROR(EAGAIN))
@@ -1373,6 +1398,7 @@ static void do_video_out(OutputFile *of,
             if (pkt->pts == AV_NOPTS_VALUE && !(enc->codec->capabilities & AV_CODEC_CAP_DELAY))
                 pkt->pts = ost->sync_opts;
 
+            //将时间基转换成muxer时间基
             av_packet_rescale_ts(pkt, enc->time_base, ost->mux_timebase);
 
             if (debug_ts) {
@@ -1383,6 +1409,7 @@ static void do_video_out(OutputFile *of,
             }
 
             frame_size = pkt->size;
+            //写到输出文件,通过一层层调用最终调用av_interleaved_write_frame
             output_packet(of, pkt, ost, 0);
 
             /* if two pass, output log */
@@ -1479,6 +1506,7 @@ static void finish_output_stream(OutputStream *ost)
  *
  * @return  0 for success, <0 for severe errors
  */
+//从filter读取frame,然后调用do_video_out/do_audio_out
 static int reap_filters(int flush)
 {
     AVFrame *filtered_frame = NULL;
@@ -1492,6 +1520,7 @@ static int reap_filters(int flush)
         AVCodecContext *enc = ost->enc_ctx;
         int ret = 0;
 
+        //如果所有流都是copy就会continue，实际reap_filters什么也没做就返回了
         if (!ost->filter || !ost->filter->graph->graph)
             continue;
         filter = ost->filter->filter;
@@ -1511,6 +1540,7 @@ static int reap_filters(int flush)
         filtered_frame = ost->filtered_frame;
 
         while (1) {
+            //从filter读取frame
             ret = av_buffersink_get_frame_flags(filter, filtered_frame,
                                                AV_BUFFERSINK_FLAG_NO_REQUEST);
             if (ret < 0) {
@@ -1533,6 +1563,11 @@ static int reap_filters(int flush)
                 if (!ost->frame_aspect_ratio.num)
                     enc->sample_aspect_ratio = filtered_frame->sample_aspect_ratio;
 
+                //video处理,通过一层层调用，最终调用avformat_write_header/av_interleaved_write_frame
+                //注意里面会从filter中读取time_base,然后做调整,即将frame time_base（从最后的filter中获取）转成编码器time_base
+                //并且编码后在将时间基转成成muxer时间基
+                //最终输出时还需要转出输出流的时间基
+                //filter.time_base -> encoder.time_base -> muxer.time_base -> out_stream.time_base
                 do_video_out(of, ost, filtered_frame);
                 break;
             case AVMEDIA_TYPE_AUDIO:
@@ -1542,6 +1577,7 @@ static int reap_filters(int flush)
                            "Audio filter graph output is not normalized and encoder does not support parameter changes\n");
                     break;
                 }
+                //audio处理,同视频
                 do_audio_out(of, ost, filtered_frame);
                 break;
             default:
@@ -2019,6 +2055,7 @@ static int check_output_constraints(InputStream *ist, OutputStream *ost)
     return 1;
 }
 
+//stream copy不需要转码，filter也没有，直接调用output_packet写入数据
 static void do_streamcopy(InputStream *ist, OutputStream *ost, const AVPacket *pkt)
 {
     OutputFile *of = output_files[ost->file_index];
@@ -2212,6 +2249,7 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_ref
             return ret;
         }
 
+        //如果需要重新初始化filter
         ret = configure_filtergraph(fg);
         if (ret < 0) {
             av_log(NULL, AV_LOG_ERROR, "Error reinitializing filters!\n");
@@ -2219,6 +2257,8 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_ref
         }
     }
 
+    //到这里时间基还是等于解码后的时间基,而解码器上下文时间基之前被设置为输入流的时间基
+    //这个函数会接管frame，类似c++中的std::move，frame被reset，里面的值不可用
     ret = av_buffersrc_add_frame_flags(ifilter->filter, frame, buffersrc_flags);
     if (ret < 0) {
         if (ret != AVERROR_EOF)
@@ -2297,6 +2337,7 @@ static int send_frame_to_filters(InputStream *ist, AVFrame *decoded_frame)
     return ret;
 }
 
+//和视频流程类似，先调用decode解码，然后调用send_frame_to_filters送入filter
 static int decode_audio(InputStream *ist, AVPacket *pkt, int *got_output,
                         int *decode_failed)
 {
@@ -2322,11 +2363,13 @@ static int decode_audio(InputStream *ist, AVPacket *pkt, int *got_output,
     if (!*got_output || ret < 0)
         return ret;
 
+    //记录解码帧数
     ist->samples_decoded += decoded_frame->nb_samples;
     ist->frames_decoded++;
 
     /* increment next_dts to use for the case where the input stream does not
        have timestamps or there are multiple frames in the packet */
+    //计算下一帧pts、dts
     ist->next_pts += ((int64_t)AV_TIME_BASE * decoded_frame->nb_samples) /
                      avctx->sample_rate;
     ist->next_dts += ((int64_t)AV_TIME_BASE * decoded_frame->nb_samples) /
@@ -2357,6 +2400,8 @@ static int decode_audio(InputStream *ist, AVPacket *pkt, int *got_output,
     return err < 0 ? err : ret;
 }
 
+//调用decode进行解码
+//然后调用send_frame_to_filters送入filter，之前分析过ffmpeg为保持流程一致，都会使用filter，如果不需要则会创建null filter
 static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_t *duration_pts, int eof,
                         int *decode_failed)
 {
@@ -2431,6 +2476,7 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
     if(ist->top_field_first>=0)
         decoded_frame->top_field_first = ist->top_field_first;
 
+    //记录解码帧数
     ist->frames_decoded++;
 
     if (ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
@@ -2475,6 +2521,7 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
     if (ist->st->sample_aspect_ratio.num)
         decoded_frame->sample_aspect_ratio = ist->st->sample_aspect_ratio;
 
+    //经过一层层调用，最终会调用av_buffersrc_add_frame_flags将frame送入filter的输入
     err = send_frame_to_filters(ist, decoded_frame);
 
 fail:
@@ -2575,6 +2622,7 @@ static int send_filter_eof(InputStream *ist)
 }
 
 /* pkt = NULL means EOF (needed to flush decoder buffers) */
+//将packet送入解码
 static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eof)
 {
     int ret = 0, i;
@@ -2625,11 +2673,13 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
 
         switch (ist->dec_ctx->codec_type) {
         case AVMEDIA_TYPE_AUDIO:
+            //解码音频包
             ret = decode_audio    (ist, repeating ? NULL : avpkt, &got_output,
                                    &decode_failed);
             av_packet_unref(avpkt);
             break;
         case AVMEDIA_TYPE_VIDEO:
+            //解码视频包
             ret = decode_video    (ist, repeating ? NULL : avpkt, &got_output, &duration_pts, !pkt,
                                    &decode_failed);
             if (!repeating || !pkt || got_output) {
@@ -2648,6 +2698,7 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
                     ist->next_dts = AV_NOPTS_VALUE;
             }
 
+            //计算下一帧时间基，音频的则在decode_audio内部处理了
             if (got_output) {
                 if (duration_pts > 0) {
                     ist->next_pts += av_rescale_q(duration_pts, ist->st->time_base, AV_TIME_BASE_Q);
@@ -2660,6 +2711,7 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
         case AVMEDIA_TYPE_SUBTITLE:
             if (repeating)
                 break;
+            //解码字幕
             ret = transcode_subtitles(ist, avpkt, &got_output, &decode_failed);
             if (!pkt && ret >= 0)
                 ret = AVERROR_EOF;
@@ -2755,6 +2807,7 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
         if (!check_output_constraints(ist, ost) || ost->encoding_needed)
             continue;
 
+        //无须解码，stream copy
         do_streamcopy(ist, ost, pkt);
     }
 
@@ -2868,8 +2921,9 @@ static int init_input_stream(int ist_index, char *error, int error_len)
     int ret;
     InputStream *ist = input_streams[ist_index];
 
+    //需要解码
     if (ist->decoding_needed) {
-        const AVCodec *codec = ist->dec;
+        const AVCodec *codec = ist->dec;//获取对应解码器
         if (!codec) {
             snprintf(error, error_len, "Decoder (codec %s) not found for input stream #%d:%d",
                     avcodec_get_name(ist->dec_ctx->codec_id), ist->file_index, ist->st->index);
@@ -2877,13 +2931,14 @@ static int init_input_stream(int ist_index, char *error, int error_len)
         }
 
         ist->dec_ctx->opaque                = ist;
-        ist->dec_ctx->get_format            = get_format;
+        ist->dec_ctx->get_format            = get_format;//自定义的获取像素格式支持，硬件加速相关
 #if LIBAVCODEC_VERSION_MAJOR < 60
 FF_DISABLE_DEPRECATION_WARNINGS
         ist->dec_ctx->thread_safe_callbacks = 1;
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
+        //字幕相关
         if (ist->dec_ctx->codec_id == AV_CODEC_ID_DVB_SUBTITLE &&
            (ist->decoding_needed & DECODING_FOR_OST)) {
             av_dict_set(&ist->decoder_opts, "compute_edt", "1", AV_DICT_DONT_OVERWRITE);
@@ -2893,14 +2948,17 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         /* Useful for subtitles retiming by lavf (FIXME), skipping samples in
          * audio, and video decoders such as cuvid or mediacodec */
+        //解码上下文时间基设置为输入流的时间基
         ist->dec_ctx->pkt_timebase = ist->st->time_base;
 
+        //解码线程设置
         if (!av_dict_get(ist->decoder_opts, "threads", NULL, 0))
             av_dict_set(&ist->decoder_opts, "threads", "auto", 0);
         /* Attached pics are sparse, therefore we would not want to delay their decoding till EOF. */
         if (ist->st->disposition & AV_DISPOSITION_ATTACHED_PIC)
             av_dict_set(&ist->decoder_opts, "threads", "1", 0);
 
+        //硬件相关
         ret = hw_device_setup_for_decode(ist);
         if (ret < 0) {
             snprintf(error, error_len, "Device setup failed for "
@@ -2909,6 +2967,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             return ret;
         }
 
+        //打开解码器
         if ((ret = avcodec_open2(ist->dec_ctx, codec, &ist->decoder_opts)) < 0) {
             if (ret == AVERROR_EXPERIMENTAL)
                 abort_codec_experimental(codec, 0);
@@ -3271,14 +3330,16 @@ static void init_encoder_time_base(OutputStream *ost, AVRational default_time_ba
     enc_ctx->time_base = default_time_base;
 }
 
+//初始化编码器参数，其中还会初始化编码器上下文的时间基，最后复用muxer时间基等于编码器时间基
 static int init_output_stream_encode(OutputStream *ost, AVFrame *frame)
 {
-    InputStream *ist = get_input_stream(ost);
-    AVCodecContext *enc_ctx = ost->enc_ctx;
-    AVCodecContext *dec_ctx = NULL;
-    AVFormatContext *oc = output_files[ost->file_index]->ctx;
+    InputStream *ist = get_input_stream(ost); //对应的输入流
+    AVCodecContext *enc_ctx = ost->enc_ctx;   //编码器上下文
+    AVCodecContext *dec_ctx = NULL;           //解码器上下文
+    AVFormatContext *oc = output_files[ost->file_index]->ctx; //编码format上下文
     int ret;
 
+    //？？？
     set_encoder_id(output_files[ost->file_index], ost);
 
     if (ist) {
@@ -3315,6 +3376,7 @@ static int init_output_stream_encode(OutputStream *ost, AVFrame *frame)
     }
 
     switch (enc_ctx->codec_type) {
+    //设置一些编码器参数，编码器参数应该和filter最终输出的格式要一致
     case AVMEDIA_TYPE_AUDIO:
         enc_ctx->sample_fmt     = av_buffersink_get_format(ost->filter->filter);
         enc_ctx->sample_rate    = av_buffersink_get_sample_rate(ost->filter->filter);
@@ -3327,10 +3389,12 @@ static int init_output_stream_encode(OutputStream *ost, AVFrame *frame)
             enc_ctx->bits_per_raw_sample = FFMIN(dec_ctx->bits_per_raw_sample,
                                                  av_get_bytes_per_sample(enc_ctx->sample_fmt) << 3);
 
+        //初始化编码器时间基
         init_encoder_time_base(ost, av_make_q(1, enc_ctx->sample_rate));
         break;
 
     case AVMEDIA_TYPE_VIDEO:
+        //初始化编码器时间基
         init_encoder_time_base(ost, av_inv_q(ost->frame_rate));
 
         if (!(enc_ctx->time_base.num && enc_ctx->time_base.den))
@@ -3425,6 +3489,7 @@ static int init_output_stream_encode(OutputStream *ost, AVFrame *frame)
         break;
     }
 
+    //输出复用muxer时间基等于编码器时间基
     ost->mux_timebase = enc_ctx->time_base;
 
     return 0;
@@ -3435,17 +3500,21 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
 {
     int ret = 0;
 
+    //需要编码
     if (ost->encoding_needed) {
         const AVCodec *codec = ost->enc;
-        AVCodecContext *dec = NULL;
-        InputStream *ist;
+        AVCodecContext *dec = NULL;  //编码器上下文
+        InputStream *ist;            //对应的输入流
 
+        //初始化编码器参数，如帧率、宽高、采样格式等等
+        //初始化编码器参数，其中还会初始化编码器上下文的时间基，最后复用muxer时间基等于编码器时间基
         ret = init_output_stream_encode(ost, frame);
         if (ret < 0)
             return ret;
 
         if ((ist = get_input_stream(ost)))
             dec = ist->dec_ctx;
+        //字幕相关
         if (dec && dec->subtitle_header) {
             /* ASS code assumes this buffer is null terminated so add extra byte. */
             ost->enc_ctx->subtitle_header = av_mallocz(dec->subtitle_header_size + 1);
@@ -3454,6 +3523,7 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
             memcpy(ost->enc_ctx->subtitle_header, dec->subtitle_header, dec->subtitle_header_size);
             ost->enc_ctx->subtitle_header_size = dec->subtitle_header_size;
         }
+        //线程硬件相关
         if (!av_dict_get(ost->encoder_opts, "threads", NULL, 0))
             av_dict_set(&ost->encoder_opts, "threads", "auto", 0);
 
@@ -3465,6 +3535,7 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
             return ret;
         }
 
+        //字幕相关
         if (ist && ist->dec->type == AVMEDIA_TYPE_SUBTITLE && ost->enc->type == AVMEDIA_TYPE_SUBTITLE) {
             int input_props = 0, output_props = 0;
             AVCodecDescriptor const *input_descriptor =
@@ -3483,6 +3554,7 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
             }
         }
 
+        //打开编码器,encoder_opts信息主要来源于命令行
         if ((ret = avcodec_open2(ost->enc_ctx, codec, &ost->encoder_opts)) < 0) {
             if (ret == AVERROR_EXPERIMENTAL)
                 abort_codec_experimental(codec, 1);
@@ -3502,6 +3574,7 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
             av_log(NULL, AV_LOG_WARNING, "The bitrate parameter is set too low."
                                          " It takes bits/s as argument, not kbits/s\n");
 
+        //编码器上下文参数拷贝到输出流参数
         ret = avcodec_parameters_from_context(ost->st->codecpar, ost->enc_ctx);
         if (ret < 0) {
             av_log(NULL, AV_LOG_FATAL,
@@ -3547,12 +3620,15 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
 
         // copy timebase while removing common factors
         if (ost->st->time_base.num <= 0 || ost->st->time_base.den <= 0)
+            //输出流时间基等于编码器时间基,add???
             ost->st->time_base = av_add_q(ost->enc_ctx->time_base, (AVRational){0, 1});
 
         // copy estimated duration as a hint to the muxer
         if (ost->st->duration <= 0 && ist && ist->st->duration > 0)
+            //duration转换成对应时间基的值
             ost->st->duration = av_rescale_q(ist->st->duration, ist->st->time_base, ost->st->time_base);
     } else if (ost->stream_copy) {
+        //不需要编码，stream copy的处理
         ret = init_output_stream_streamcopy(ost);
         if (ret < 0)
             return ret;
@@ -3565,6 +3641,7 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
     if (ret < 0)
         return ret;
 
+    //初始化标志置1
     ost->initialized = 1;
 
     ret = check_init_output_file(output_files[ost->file_index], ost->file_index);
@@ -3592,11 +3669,12 @@ static void report_new_stream(int input_index, AVPacket *pkt)
 static int transcode_init(void)
 {
     int ret = 0, i, j, k;
-    AVFormatContext *oc;
-    OutputStream *ost;
-    InputStream *ist;
+    AVFormatContext *oc; //输出流format上下文
+    OutputStream *ost;   //输出流
+    InputStream *ist;    //输入流
     char error[1024] = {0};
 
+    //filter相关
     for (i = 0; i < nb_filtergraphs; i++) {
         FilterGraph *fg = filtergraphs[i];
         for (j = 0; j < fg->nb_outputs; j++) {
@@ -3613,14 +3691,16 @@ static int transcode_init(void)
     }
 
     /* init framerate emulation */
+    //初始化输入文件
     for (i = 0; i < nb_input_files; i++) {
-        InputFile *ifile = input_files[i];
-        if (ifile->readrate || ifile->rate_emu)
-            for (j = 0; j < ifile->nb_streams; j++)
+        InputFile *ifile = input_files[i];         //查找对应输入文件
+        if (ifile->readrate || ifile->rate_emu)    //帧率仿真，主要是实时推流用，可以按照播放速度推流
+            for (j = 0; j < ifile->nb_streams; j++)//记录流的起始时间
                 input_streams[j + ifile->ist_index]->start = av_gettime_relative();
     }
 
     /* init input streams */
+    //初始化输入流，设置解码器参数，打开解码器
     for (i = 0; i < nb_input_streams; i++)
         if ((ret = init_input_stream(i, error, sizeof(error))) < 0) {
             for (i = 0; i < nb_output_streams; i++) {
@@ -3639,6 +3719,10 @@ static int transcode_init(void)
      *   to be configured with the correct audio frame size, which is only
      *   known after the encoder is initialized.
      */
+    //初始化输出流，打开编码器,注意这里的逻辑，音视频流被忽略了，没有处理音视频流！！！
+    //那音视频流在哪处理了，todo
+    //真正打开编码器和写入header是在reap_filters -> do_video_out/do_audio_out（一层层调用）
+    //也就是说在第一个packet被解码出来之后，
     for (i = 0; i < nb_output_streams; i++) {
         if (!output_streams[i]->stream_copy &&
             (output_streams[i]->enc_ctx->codec_type == AVMEDIA_TYPE_VIDEO ||
@@ -3676,6 +3760,7 @@ static int transcode_init(void)
         }
     }
 
+ //dump信息
  dump_format:
     /* dump the stream mapping */
     av_log(NULL, AV_LOG_INFO, "Stream mapping:\n");
@@ -4089,6 +4174,7 @@ static int get_input_packet(InputFile *f, AVPacket **pkt)
             int64_t stream_ts_offset, pts, now;
             if (!ist->nb_packets || (ist->decoding_needed && !ist->got_output)) continue;
             stream_ts_offset = FFMAX(ist->first_dts != AV_NOPTS_VALUE ? ist->first_dts : 0, file_start);
+            //输入时间基转微妙？
             pts = av_rescale(ist->dts, 1000000, AV_TIME_BASE);
             now = (av_gettime_relative() - ist->start) * scale + stream_ts_offset;
             if (pts > now)
@@ -4208,8 +4294,12 @@ static int seek_to_start(InputFile *ifile, AVFormatContext *is)
  *   this function should be called again
  * - AVERROR_EOF -- this function should not be called again
  */
+//注意这个函数在会被循环调用,每次都读取一个packet,然后进行解码处理
+//这个函数主要调用get_input_packet读取一个packet
+//然后调用process_input_packet解码
 static int process_input(int file_index)
 {
+    //输入文件
     InputFile *ifile = input_files[file_index];
     AVFormatContext *is;
     InputStream *ist;
@@ -4220,12 +4310,14 @@ static int process_input(int file_index)
     int disable_discontinuity_correction = copy_ts;
 
     is  = ifile->ctx;
+    //从输入文件中read一个packet,这是主要数据来源，av_read_frame
     ret = get_input_packet(ifile, &pkt);
 
     if (ret == AVERROR(EAGAIN)) {
         ifile->eagain = 1;
         return ret;
     }
+    //todo 
     if (ret < 0 && ifile->loop) {
         AVCodecContext *avctx;
         for (i = 0; i < ifile->nb_streams; i++) {
@@ -4298,8 +4390,10 @@ static int process_input(int file_index)
         goto discard_packet;
     }
 
+    //获知我们是属于那个输入流
     ist = input_streams[ifile->ist_index + pkt->stream_index];
 
+    //统计一些数据
     ist->data_size += pkt->size;
     ist->nb_packets++;
 
@@ -4313,6 +4407,7 @@ static int process_input(int file_index)
             exit_program(1);
     }
 
+    //debug 时间戳
     if (debug_ts) {
         av_log(NULL, AV_LOG_INFO, "demuxer -> ist_index:%d type:%s "
                "next_dts:%s next_dts_time:%s next_pts:%s next_pts_time:%s pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s off:%s off_time:%s\n",
@@ -4481,6 +4576,7 @@ static int process_input(int file_index)
 
     sub2video_heartbeat(ist, pkt->pts);
 
+    //解码主要入口，avcodec_send_packet
     process_input_packet(ist, pkt, 0);
 
 discard_packet:
@@ -4547,12 +4643,14 @@ static int transcode_from_filter(FilterGraph *graph, InputStream **best_ist)
  *
  * @return  0 for success, <0 for error
  */
+//转码，注意这个函数在while循环里被调用
 static int transcode_step(void)
 {
     OutputStream *ost;
     InputStream  *ist = NULL;
     int ret;
 
+    //选择时间戳最小的流，以便一直循环遍历,todo ???
     ost = choose_output();
     if (!ost) {
         if (got_eagain()) {
@@ -4564,6 +4662,7 @@ static int transcode_step(void)
         return AVERROR_EOF;
     }
 
+    //filter相关,关系到数据解码后输入输出，也非常关键
     if (ost->filter && !ost->filter->graph->graph) {
         if (ifilter_has_all_input_formats(ost->filter->graph)) {
             ret = configure_filtergraph(ost->filter->graph);
@@ -4618,9 +4717,11 @@ static int transcode_step(void)
         }
     } else {
         av_assert0(ost->source_index >= 0);
+        //对应输入流
         ist = input_streams[ost->source_index];
     }
 
+    //重点函数,从输入文件中read packet进行解码，然后送入filter
     ret = process_input(ist->file_index);
     if (ret == AVERROR(EAGAIN)) {
         if (input_files[ist->file_index]->eagain)
@@ -4631,12 +4732,14 @@ static int transcode_step(void)
     if (ret < 0)
         return ret == AVERROR_EOF ? 0 : ret;
 
+    //从filter获取frame进行编码封装
     return reap_filters(0);
 }
 
 /*
  * The following code is the main loop of the file converter
  */
+//转码主流程
 static int transcode(void)
 {
     int ret, i;
@@ -4646,6 +4749,7 @@ static int transcode(void)
     int64_t timer_start;
     int64_t total_packets_written = 0;
 
+    //初始化打开输出输入流编解码器，写入输出文件header
     ret = transcode_init();
     if (ret < 0)
         goto fail;
@@ -4654,6 +4758,7 @@ static int transcode(void)
         av_log(NULL, AV_LOG_INFO, "Press [q] to stop, [?] for help\n");
     }
 
+    //转码时间相关
     timer_start = av_gettime_relative();
 
 #if HAVE_THREADS
@@ -4661,9 +4766,11 @@ static int transcode(void)
         goto fail;
 #endif
 
+    //循环读取packet并进行转码和编码，直到收到系统信号
     while (!received_sigterm) {
         int64_t cur_time= av_gettime_relative();
 
+        //按键相关
         /* if 'q' pressed, exits */
         if (stdin_interaction)
             if (check_keyboard_interaction(cur_time) < 0)
@@ -4675,6 +4782,7 @@ static int transcode(void)
             break;
         }
 
+        //具体转码工作,注意这是再循环里面的，每次都会调用
         ret = transcode_step();
         if (ret < 0 && ret != AVERROR_EOF) {
             av_log(NULL, AV_LOG_ERROR, "Error while filtering: %s\n", av_err2str(ret));
@@ -4682,12 +4790,14 @@ static int transcode(void)
         }
 
         /* dump report by using the output first video and audio streams */
+        //打印报告信息，如转码时长等
         print_report(0, timer_start, cur_time);
     }
 #if HAVE_THREADS
     free_input_threads();
 #endif
 
+    //冲刷编码器
     /* at the end of stream, we must flush the decoder buffers */
     for (i = 0; i < nb_input_streams; i++) {
         ist = input_streams[i];
@@ -4700,6 +4810,7 @@ static int transcode(void)
     term_exit();
 
     /* write the trailer if needed */
+    //输出文件写尾
     for (i = 0; i < nb_output_files; i++) {
         os = output_files[i]->ctx;
         if (!output_files[i]->header_written) {
@@ -4720,6 +4831,7 @@ static int transcode(void)
     print_report(1, timer_start, av_gettime_relative());
 
     /* close the output files */
+    //关闭输出文件
     for (i = 0; i < nb_output_files; i++) {
         os = output_files[i]->ctx;
         if (os && os->oformat && !(os->oformat->flags & AVFMT_NOFILE)) {
@@ -4732,6 +4844,7 @@ static int transcode(void)
     }
 
     /* close each encoder */
+    //关闭编码器
     for (i = 0; i < nb_output_streams; i++) {
         ost = output_streams[i];
         if (ost->encoding_needed) {
@@ -4750,6 +4863,7 @@ static int transcode(void)
     }
 
     /* close each decoder */
+    //关闭解码器
     for (i = 0; i < nb_input_streams; i++) {
         ist = input_streams[i];
         if (ist->decoding_needed) {
@@ -4769,6 +4883,7 @@ static int transcode(void)
     free_input_threads();
 #endif
 
+    //free 释放操作
     if (output_streams) {
         for (i = 0; i < nb_output_streams; i++) {
             ost = output_streams[i];
@@ -4851,6 +4966,7 @@ int main(int argc, char **argv)
 
     setvbuf(stderr,NULL,_IONBF,0); /* win32 runtime needs this */
 
+    //log设置相关
     av_log_set_flags(AV_LOG_SKIP_REPEATED);
     parse_loglevel(argc, argv, options);
 
@@ -4861,6 +4977,7 @@ int main(int argc, char **argv)
         argv++;
     }
 
+    //注册和初始化网络
 #if CONFIG_AVDEVICE
     avdevice_register_all();
 #endif
@@ -4869,6 +4986,7 @@ int main(int argc, char **argv)
     show_banner(argc, argv, options);
 
     /* parse options and open all input/output files */
+    //解析命令行参数,并根据命令参数初始化
     ret = ffmpeg_parse_options(argc, argv);
     if (ret < 0)
         exit_program(1);
@@ -4891,8 +5009,10 @@ int main(int argc, char **argv)
     }
 
     current_time = ti = get_benchmark_time_stamps();
+    //转码主流程
     if (transcode() < 0)
         exit_program(1);
+    //转码时间相关
     if (do_benchmark) {
         int64_t utime, stime, rtime;
         current_time = get_benchmark_time_stamps();

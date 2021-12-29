@@ -405,6 +405,7 @@ static int insert_filter(AVFilterContext **last_filter, int *pad_idx,
     return 0;
 }
 
+//配置视频filter,创建最终输出filter buffersink,以及一些其他的格式转换filter,然后再将他们于中间过程输出filter一级一级连接起来
 static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter, AVFilterInOut *out)
 {
     OutputStream *ost = ofilter->ost;
@@ -416,6 +417,7 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
     const char *pix_fmts;
     char name[255];
 
+    //创建最终输出filter buffersink
     snprintf(name, sizeof(name), "out_%d_%d", ost->file_index, ost->index);
     ret = avfilter_graph_create_filter(&ofilter->filter,
                                        avfilter_get_by_name("buffersink"),
@@ -439,12 +441,15 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
 
         snprintf(name, sizeof(name), "scaler_out_%d_%d",
                  ost->file_index, ost->index);
+        //如果指定了宽高,在加一级scale filter
         if ((ret = avfilter_graph_create_filter(&filter, avfilter_get_by_name("scale"),
                                                 name, args, NULL, fg->graph)) < 0)
             return ret;
+        //将中间过程输出 out_filter link -> scale filter
         if ((ret = avfilter_link(last_filter, pad_idx, filter, 0)) < 0)
             return ret;
 
+        //记录last等于scale,后面link用
         last_filter = filter;
         pad_idx = 0;
     }
@@ -453,12 +458,14 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
     if ((pix_fmts = choose_pix_fmts(ofilter, &bprint))) {
         AVFilterContext *filter;
 
+        //添加一级fromat filter
         ret = avfilter_graph_create_filter(&filter,
                                            avfilter_get_by_name("format"),
                                            "format", pix_fmts, NULL, fg->graph);
         av_bprint_finalize(&bprint, NULL);
         if (ret < 0)
             return ret;
+        //scale filter link -> format filter
         if ((ret = avfilter_link(last_filter, pad_idx, filter, 0)) < 0)
             return ret;
 
@@ -474,11 +481,13 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
                  ost->frame_rate.den);
         snprintf(name, sizeof(name), "fps_out_%d_%d",
                  ost->file_index, ost->index);
+        //如果需要增加fps filter
         ret = avfilter_graph_create_filter(&fps, avfilter_get_by_name("fps"),
                                            name, args, NULL, fg->graph);
         if (ret < 0)
             return ret;
 
+        //format filter link -> fps
         ret = avfilter_link(last_filter, pad_idx, fps, 0);
         if (ret < 0)
             return ret;
@@ -494,12 +503,15 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
         return ret;
 
 
+    //连接到最终输出filter buffersink，注意连接顺序，中间过程out_filter -> scale filter -> ... -> buffersink
+    //buffersink 是我们创建的
     if ((ret = avfilter_link(last_filter, pad_idx, ofilter->filter, 0)) < 0)
         return ret;
 
     return 0;
 }
 
+//配置音频filter,和视频流程类似,创建abuffersink,以及一些其他的filter然后一级一级连接
 static int configure_output_audio_filter(FilterGraph *fg, OutputFilter *ofilter, AVFilterInOut *out)
 {
     OutputStream *ost = ofilter->ost;
@@ -608,6 +620,7 @@ fail:
     return ret;
 }
 
+//配置输出filter
 static int configure_output_filter(FilterGraph *fg, OutputFilter *ofilter,
                                    AVFilterInOut *out)
 {
@@ -685,14 +698,17 @@ static int sub2video_prepare(InputStream *ist, InputFilter *ifilter)
     return 0;
 }
 
+//配置视频输入filter,即创建输入源filte buffer,流程和之前学习的一样
 static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
                                         AVFilterInOut *in)
 {
     AVFilterContext *last_filter;
+    //创建视频输入filter
     const AVFilter *buffer_filt = avfilter_get_by_name("buffer");
     const AVPixFmtDescriptor *desc;
     InputStream *ist = ifilter->ist;
     InputFile     *f = input_files[ist->file_index];
+    //如果指定了帧率则使用帧率的时间基，否则使用输入流的时间基
     AVRational tb = ist->framerate.num ? av_inv_q(ist->framerate) :
                                          ist->st->time_base;
     AVRational fr = ist->framerate;
@@ -701,6 +717,7 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
     char name[255];
     int ret, pad_idx = 0;
     int64_t tsoffset = 0;
+    //创建参数
     AVBufferSrcParameters *par = av_buffersrc_parameters_alloc();
 
     if (!par)
@@ -734,18 +751,22 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
              tb.num, tb.den, sar.num, sar.den);
     if (fr.num && fr.den)
         av_bprintf(&args, ":frame_rate=%d/%d", fr.num, fr.den);
+    //输入filter名字
     snprintf(name, sizeof(name), "graph %d input from stream %d:%d", fg->index,
              ist->file_index, ist->st->index);
 
 
+    //创建输入filter
     if ((ret = avfilter_graph_create_filter(&ifilter->filter, buffer_filt, name,
                                             args.str, NULL, fg->graph)) < 0)
         goto fail;
     par->hw_frames_ctx = ifilter->hw_frames_ctx;
+    //设置一些参数
     ret = av_buffersrc_parameters_set(ifilter->filter, par);
     if (ret < 0)
         goto fail;
     av_freep(&par);
+    //last_filter等于我们创建的这个filter,在连接时用
     last_filter = ifilter->filter;
 
     desc = av_pix_fmt_desc_get(ifilter->format);
@@ -809,6 +830,7 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
     if (ret < 0)
         return ret;
 
+    //link,last_filter就是我们创建的输入filter buffer,将其连接到在外面使用命令行创建的中间过程的输入filter
     if ((ret = avfilter_link(last_filter, 0, in->filter_ctx, in->pad_idx)) < 0)
         return ret;
     return 0;
@@ -818,6 +840,7 @@ fail:
     return ret;
 }
 
+//配置音频输入filter,流程和video类似,都是创建输入filter,然后link到中间过程输入filter
 static int configure_input_audio_filter(FilterGraph *fg, InputFilter *ifilter,
                                         AVFilterInOut *in)
 {
@@ -928,6 +951,7 @@ static int configure_input_audio_filter(FilterGraph *fg, InputFilter *ifilter,
     return 0;
 }
 
+//配置输入filter
 static int configure_input_filter(FilterGraph *fg, InputFilter *ifilter,
                                   AVFilterInOut *in)
 {
@@ -978,17 +1002,37 @@ static int graph_is_meta(AVFilterGraph *graph)
     return 1;
 }
 
+
+//filter相关,关系到数据解码后输入输出，也非常关键
+//ffmpeg中为了统一，无论是否需要都会经过filter，如果不需要则会产生一个空的null filter
+//ffmpeg中使用命令行模式的filter,但是注意的是我们只使用命令行模式创建中间的filter，输入和输出filter我们自己创建，最后手动拼接
+//filtergraph需要用到的一些filter，注意我们考虑null filter的情况:
+//audio: abuffer,Parsed_anull_0,aformat,abuffersink
+//video: buffer，Parsed_null_0,format,buffersink
+
+//                     input_stream[0]                         decode_video                                    buffer  -> Parsed_null_0  -> format  -> buffersink                        av_buffersink_get_frame_flags -> do_video_out
+// input_files[0] -->                  -->  av_read_frame -->                --> av_buffersrc_add_frame  -->                                                       --> reap_filters --> 
+//                     input_stream[1]                         decode_audio                                    abuffer -> Parsed_anull_0 -> aformat -> abuffersink                       av_buffersink_get_frame_flags -> do_audio_out
+
+// |___!___________________!____________________!__________________!____________________!___________________________________________!___________________________________________________________________!______________________!______|
+//  输入文件              音视频流              读取packet           解码               送入filter                                   filter处理                                                      从filter读取frame           编码写入输出
+
+//这个传递进来的fg=stream.filter.graph
 int configure_filtergraph(FilterGraph *fg)
 {
     AVFilterInOut *inputs, *outputs, *cur;
     int ret, i, simple = filtergraph_is_simple(fg);
+    //中间过程(除输入输出)filter描述
     const char *graph_desc = simple ? fg->outputs[0]->ost->avfilter :
                                       fg->graph_desc;
 
+    //先clean
     cleanup_filtergraph(fg);
+    //创建filter总管graph
     if (!(fg->graph = avfilter_graph_alloc()))
         return AVERROR(ENOMEM);
 
+    //简单filter,配置一些参数
     if (simple) {
         OutputStream *ost = fg->outputs[0]->ost;
         char args[512];
@@ -1012,6 +1056,7 @@ int configure_filtergraph(FilterGraph *fg)
         }
         if (strlen(args)) {
             args[strlen(args)-1] = 0;
+            //视频画面使用
             fg->graph->scale_sws_opts = av_strdup(args);
         }
 
@@ -1023,11 +1068,13 @@ int configure_filtergraph(FilterGraph *fg)
         }
         if (strlen(args))
             args[strlen(args)-1] = 0;
+        //音频重采样使用
         av_opt_set(fg->graph, "aresample_swr_opts", args, 0);
     } else {
         fg->graph->nb_threads = filter_complex_nbthreads;
     }
 
+    //解析中间过程filter描述,即命令行模式的filter描述
     if ((ret = avfilter_graph_parse2(fg->graph, graph_desc, &inputs, &outputs)) < 0)
         goto fail;
 
@@ -1061,6 +1108,8 @@ int configure_filtergraph(FilterGraph *fg)
         goto fail;
     }
 
+    //配置输入filter,前面说了,命令行模式创建的是中间过程filter,不包括输入输出filter,这里就是要创建输入
+    //内部会创建音频和视频的输入filter:abuffer/buffer,然后连接到中间过程输入filter
     for (cur = inputs, i = 0; cur; cur = cur->next, i++)
         if ((ret = configure_input_filter(fg, fg->inputs[i], cur)) < 0) {
             avfilter_inout_free(&inputs);
@@ -1069,12 +1118,15 @@ int configure_filtergraph(FilterGraph *fg)
         }
     avfilter_inout_free(&inputs);
 
+    //配置输出filter,和输入类似,创建buffersink/abuffersink,以及一些其他格式filter,一级一级连接
+    //注意和输入的区别，这里是将中间过程filter连接到buffersink,因为buffersink才是最终输出filter
     for (cur = outputs, i = 0; cur; cur = cur->next, i++)
         configure_output_filter(fg, fg->outputs[i], cur);
     avfilter_inout_free(&outputs);
 
     if (!auto_conversion_filters)
         avfilter_graph_set_auto_convert(fg->graph, AVFILTER_AUTO_CONVERT_NONE);
+    //提交filter config
     if ((ret = avfilter_graph_config(fg->graph, NULL)) < 0)
         goto fail;
 
@@ -1082,6 +1134,7 @@ int configure_filtergraph(FilterGraph *fg)
 
     /* limit the lists of allowed formats to the ones selected, to
      * make sure they stay the same if the filtergraph is reconfigured later */
+    //如果filtergraph是后来设置的,需要保持参数一致?
     for (i = 0; i < fg->nb_outputs; i++) {
         OutputFilter *ofilter = fg->outputs[i];
         AVFilterContext *sink = ofilter->filter;
@@ -1095,7 +1148,7 @@ int configure_filtergraph(FilterGraph *fg)
         ofilter->channel_layout = av_buffersink_get_channel_layout(sink);
     }
 
-    fg->reconfiguration = 1;
+    fg->reconfiguration = 1;//配置好了
 
     for (i = 0; i < fg->nb_outputs; i++) {
         OutputStream *ost = fg->outputs[i]->ost;
@@ -1109,14 +1162,18 @@ int configure_filtergraph(FilterGraph *fg)
         }
         if (ost->enc->type == AVMEDIA_TYPE_AUDIO &&
             !(ost->enc->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE))
+            //设置buffer大小,对于audio非常重要
             av_buffersink_set_frame_size(ost->filter->filter,
                                          ost->enc_ctx->frame_size);
     }
 
+    //在congfig中add_frame???
     for (i = 0; i < fg->nb_inputs; i++) {
         while (av_fifo_size(fg->inputs[i]->frame_queue)) {
             AVFrame *tmp;
+            //从fifo中读取frame
             av_fifo_generic_read(fg->inputs[i]->frame_queue, &tmp, sizeof(tmp), NULL);
+            //输入到filter中
             ret = av_buffersrc_add_frame(fg->inputs[i]->filter, tmp);
             av_frame_free(&tmp);
             if (ret < 0)
@@ -1127,6 +1184,7 @@ int configure_filtergraph(FilterGraph *fg)
     /* send the EOFs for the finished inputs */
     for (i = 0; i < fg->nb_inputs; i++) {
         if (fg->inputs[i]->eof) {
+            //eof 冲刷filter
             ret = av_buffersrc_add_frame(fg->inputs[i]->filter, NULL);
             if (ret < 0)
                 goto fail;
@@ -1134,6 +1192,7 @@ int configure_filtergraph(FilterGraph *fg)
     }
 
     /* process queued up subtitle packets */
+    //subtitle?
     for (i = 0; i < fg->nb_inputs; i++) {
         InputStream *ist = fg->inputs[i]->ist;
         if (ist->sub2video.sub_queue && ist->sub2video.frame) {

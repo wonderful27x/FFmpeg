@@ -283,6 +283,7 @@ static inline void prepare_app_arguments(int *argc_ptr, char ***argv_ptr)
 }
 #endif /* HAVE_COMMANDLINETOARGVW */
 
+//将解析的参数option写入optctx上下文
 static int write_option(void *optctx, const OptionDef *po, const char *opt,
                         const char *arg)
 {
@@ -324,6 +325,7 @@ static int write_option(void *optctx, const OptionDef *po, const char *opt,
     } else if (po->flags & OPT_DOUBLE) {
         *(double *)dst = parse_number_or_die(opt, arg, OPT_DOUBLE, -INFINITY, INFINITY);
     } else if (po->u.func_arg) {
+        //函数指针的调用,向上下文optctx写入参数，比如opt_video_codec
         int ret = po->u.func_arg(optctx, opt, arg);
         if (ret < 0) {
             av_log(NULL, AV_LOG_ERROR,
@@ -402,6 +404,7 @@ void parse_options(void *optctx, int argc, char **argv, const OptionDef *options
     }
 }
 
+//解析OptionGroup参数，然后写入optctx上下文
 int parse_optgroup(void *optctx, OptionGroup *g)
 {
     int i, ret;
@@ -425,6 +428,7 @@ int parse_optgroup(void *optctx, OptionGroup *g)
         av_log(NULL, AV_LOG_DEBUG, "Applying option %s (%s) with argument %s.\n",
                o->key, o->opt->help, o->val);
 
+        //真正干活的函数
         ret = write_option(optctx, o->opt, o->key, o->val);
         if (ret < 0)
             return ret;
@@ -725,6 +729,11 @@ void uninit_parse_context(OptionParseContext *octx)
     uninit_opts();
 }
 
+//解析命令行参数，保存到OptionParseContext中
+//首先分配输入输出两个GroupList,和一个global的group
+//然后循环从argv中取出参数，并在全局的options中查找是否是定义的参数，
+//如果是就add_opt，把参数先暂存到临时group中,如果是global的参数则保存到global中
+//然后再调用finish_group，判断是输入还是输出，为GroupList创建一个group,将临时group写到里面
 int split_commandline(OptionParseContext *octx, int argc, char *argv[],
                       const OptionDef *options,
                       const OptionGroupDef *groups, int nb_groups)
@@ -735,9 +744,11 @@ int split_commandline(OptionParseContext *octx, int argc, char *argv[],
     /* perform system-dependent conversions for arguments list */
     prepare_app_arguments(&argc, &argv);
 
+    //分配内存，赋值等,分配了两个GroupList,即输入输出,还有一个static的global的group
     init_parse_context(octx, groups, nb_groups);
     av_log(NULL, AV_LOG_DEBUG, "Splitting the commandline.\n");
 
+    //循环取出argv 中的参数进行解析
     while (optindex < argc) {
         const char *opt = argv[optindex++], *arg;
         const OptionDef *po;
@@ -745,12 +756,17 @@ int split_commandline(OptionParseContext *octx, int argc, char *argv[],
 
         av_log(NULL, AV_LOG_DEBUG, "Reading option '%s' ...", opt);
 
+        //跳过 --xx xx格式参数
         if (opt[0] == '-' && opt[1] == '-' && !opt[2]) {
             dashdash = optindex;
             continue;
         }
         /* unnamed group separators, e.g. output filename */
         if (opt[0] != '-' || !opt[1] || dashdash+1 == optindex) {
+            //index是0，输出groupList处理，octx->cur_group数组的值以及专属参数
+            //存储到 octx->groups[0]结构体中的group,并清空 octx->cur_group 数组的值
+            //内部会给GroupList分配一个Group
+            //注意临时group即cur_group中的数据是在下面add_opt是写入的
             finish_group(octx, 0, opt);
             av_log(NULL, AV_LOG_DEBUG, " matched as %s.\n", groups[0].name);
             continue;
@@ -767,8 +783,10 @@ do {                                                                           \
 } while (0)
 
         /* named group separators, e.g. -i */
+        //如果是 -i xxx 返回1,表示输入
         if ((ret = match_group_separator(groups, nb_groups, opt)) >= 0) {
             GET_ARG(arg);
+            //处理输入groupList
             finish_group(octx, ret, arg);
             av_log(NULL, AV_LOG_DEBUG, " matched as %s with argument '%s'.\n",
                    groups[ret].name, arg);
@@ -776,6 +794,7 @@ do {                                                                           \
         }
 
         /* normal options */
+        //在全局定义的options中查找opt参数，如果有说明是有效的参数，
         po = find_option(options, opt);
         if (po->name) {
             if (po->flags & OPT_EXIT) {
@@ -787,6 +806,8 @@ do {                                                                           \
                 arg = "1";
             }
 
+            //则将参数写入group组保存到octx中,
+            //注意是先写到临时group或global中,然后continue,在finish_group中才将临时group数据拷贝到groupList中的group中
             add_opt(octx, po, opt, arg);
             av_log(NULL, AV_LOG_DEBUG, " matched as option '%s' (%s) with "
                    "argument '%s'.\n", po->name, po->help, arg);
@@ -795,6 +816,8 @@ do {                                                                           \
 
         /* AVOptions */
         if (argv[optindex]) {
+            /*在 avcodec_options、avformat_options、avresample_options、
+            swscale_options、swresample 中的 options 参数中不断查找，查找专属*/
             ret = opt_default(NULL, opt, argv[optindex]);
             if (ret >= 0) {
                 av_log(NULL, AV_LOG_DEBUG, " matched as AVOption '%s' with "
@@ -809,6 +832,7 @@ do {                                                                           \
         }
 
         /* boolean -nofoo options */
+        //处理-noxx参数
         if (opt[0] == 'n' && opt[1] == 'o' &&
             (po = find_option(options, opt + 2)) &&
             po->name && po->flags & OPT_BOOL) {
@@ -822,6 +846,7 @@ do {                                                                           \
         return AVERROR_OPTION_NOT_FOUND;
     }
 
+    // 循环结束后，临时参数及专属参数还存在值，没有存储到输入&输出相关参数数组中
     if (octx->cur_group.nb_opts || codec_opts || format_opts)
         av_log(NULL, AV_LOG_WARNING, "Trailing option(s) found in the "
                "command: may be ignored.\n");
