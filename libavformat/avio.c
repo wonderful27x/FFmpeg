@@ -295,8 +295,10 @@ int ffurl_alloc(URLContext **puc, const char *filename, int flags,
 {
     const URLProtocol *p = NULL;
 
+    //查找对应的网络协议，如hls是http
     p = url_find_protocol(filename);
     if (p)
+        //创建并配置网络协议
        return url_alloc_for_protocol(puc, p, filename, flags, int_cb);
 
     *puc = NULL;
@@ -310,6 +312,7 @@ int ffurl_open_whitelist(URLContext **puc, const char *filename, int flags,
 {
     AVDictionary *tmp_opts = NULL;
     AVDictionaryEntry *e;
+    //创建并配置对应的网络协议
     int ret = ffurl_alloc(puc, filename, flags, int_cb);
     if (ret < 0)
         return ret;
@@ -344,6 +347,7 @@ int ffurl_open_whitelist(URLContext **puc, const char *filename, int flags,
     if ((ret = av_opt_set_dict(*puc, options)) < 0)
         goto fail;
 
+    //连接，如hls发送http下载m3u3文件的请求报文
     ret = ffurl_connect(*puc, options);
 
     if (!ret)

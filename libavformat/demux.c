@@ -154,8 +154,10 @@ static int init_input(AVFormatContext *s, const char *filename,
     AVProbeData pd = { filename, NULL, 0 };
     int score = AVPROBE_SCORE_RETRY;
 
+    //如果是用户自定义io,即用户自定义了数据读取方法
     if (s->pb) {
         s->flags |= AVFMT_FLAG_CUSTOM_IO;
+        //还没有解复用AVInputFormat则调用 av_probe_input_buffer2创建
         if (!s->iformat)
             return av_probe_input_buffer2(s->pb, &s->iformat, filename,
                                           s, 0, s->format_probesize);
@@ -165,15 +167,32 @@ static int init_input(AVFormatContext *s, const char *filename,
         return 0;
     }
 
+    //否则
+    //1.如果有format并且是AVFMT_NOFILE(调用者没有提供打开的文件)则返回
+    //2.或者没有format，并且调用av_probe_input_format2创建成功也返回
+    //todo av_probe_input_format2 根据文件名探测？
     if ((s->iformat && s->iformat->flags & AVFMT_NOFILE) ||
         (!s->iformat && (s->iformat = av_probe_input_format2(&pd, 0, &score))))
         return score;
 
+    //否则
+    //1.有format，并且用户提供了打开的文件
+    //2.或者没有format，调用 av_probe_input_format2也没有创建成功
+    //调用io_open(io_open_default)打开文件进行解析,然后创建format，打开失败则返回
+    //注意对于流媒体文件，在播放的时候都会指定url,如hls，http://xxx.m3u8
+    //对于hls流媒体来说，io_open_default最终会经过一层层调用，最终查找http协议，并发送下载m3u8文件的请求报文,然后创建AVIOContext
+    //显然对于hls到这里仍然没有创建出解复用器format
     if ((ret = s->io_open(s, &s->pb, filename, AVIO_FLAG_READ | s->avio_flags, options)) < 0)
         return ret;
 
+    //如果创建format成功则返回
     if (s->iformat)
         return 0;
+
+    //否则调用io_open都没有创建出format
+    //调用 av_probe_input_buffer2进行创建
+    //对于hls,io_open发送了m3u8文件请求报文，到这里开始使用上面创建的AVIOContext读取http响应报文，并探测解复用为ff_hls_demuxer
+    //av_probe_input_buffer2最终又会调用av_probe_input_format2,具体如何探测的又带研究
     return av_probe_input_buffer2(s->pb, &s->iformat, filename,
                                   s, 0, s->format_probesize);
 }
@@ -213,6 +232,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     ID3v2ExtraMeta *id3v2_extra_meta = NULL;
     int ret = 0;
 
+    //如果传递的上下文为null则创建一个format上下文
     if (!s && !(s = avformat_alloc_context()))
         return AVERROR(ENOMEM);
     si = ffformatcontext(s);
@@ -237,6 +257,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
         goto fail;
     }
 
+    //初始化input，即根据各种探测，创建出具体的解复用器AVInputFormat，如ff_hls_demuxer
     if ((ret = init_input(s, filename, &tmp)) < 0)
         goto fail;
     s->probe_score = ret;
@@ -276,6 +297,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     s->duration = s->start_time = AV_NOPTS_VALUE;
 
     /* Allocate private data. */
+    //创建出解复用的private data,如hls的是HLSContext
     if (s->iformat->priv_data_size > 0) {
         if (!(s->priv_data = av_mallocz(s->iformat->priv_data_size))) {
             ret = AVERROR(ENOMEM);
@@ -293,6 +315,8 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     if (s->pb)
         ff_id3v2_read_dict(s->pb, &si->id3v2_meta, ID3v2_DEFAULT_MAGIC, &id3v2_extra_meta);
 
+    //调用解复用AVInputFormat::read_header解析文件,如hls对应的就是hls_read_header
+    //具体的解析流程就走具体的实现，如hls就是解析m3u8文件
     if (s->iformat->read_header)
         if ((ret = s->iformat->read_header(s)) < 0) {
             if (s->iformat->flags_internal & FF_FMT_INIT_CLEANUP)
@@ -555,6 +579,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
 
+        //调用解复用器的读取函数,如ff_hls_demuxer::read_packet
         err = s->iformat->read_packet(s, pkt);
         if (err < 0) {
             av_packet_unref(pkt);
@@ -1230,6 +1255,8 @@ static int read_frame_internal(AVFormatContext *s, AVPacket *pkt)
         FFStream *sti;
 
         /* read next packet */
+        //关键read函数,内部会调用解复用AVInputFormat::read_pakcet
+        //如果是hls，则调用ff_hls_demuxer::read_packet
         ret = ff_read_packet(s, pkt);
         if (ret < 0) {
             if (ret == AVERROR(EAGAIN))
@@ -1476,6 +1503,7 @@ int av_read_frame(AVFormatContext *s, AVPacket *pkt)
             }
         }
 
+        //关键read函数
         ret = read_frame_internal(s, pkt);
         if (ret < 0) {
             if (pktl && ret != AVERROR(EAGAIN)) {

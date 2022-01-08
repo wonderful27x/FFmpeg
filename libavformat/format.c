@@ -278,6 +278,7 @@ int av_probe_input_buffer2(AVIOContext *pb, const AVInputFormat **fmt,
         memset(pd.buf + pd.buf_size, 0, AVPROBE_PADDING_SIZE);
 
         /* Guess file format. */
+        //pd结构体有avio_read的数据,对于hls应该就是m3u8文件的http响应报文
         *fmt = av_probe_input_format2(&pd, 1, &score);
         if (*fmt) {
             /* This can only be true in the last iteration. */

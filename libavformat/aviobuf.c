@@ -1232,9 +1232,11 @@ int ffio_open_whitelist(AVIOContext **s, const char *filename, int flags,
 
     *s = NULL;
 
+    //查找网络协议，建立conect,如hls会创建http并配置协议，然后发送下载m3u8文件的请求报文
     err = ffurl_open_whitelist(&h, filename, flags, int_cb, options, whitelist, blacklist, NULL);
     if (err < 0)
         return err;
+    //创建AVIOContext,io read 是ffurl_read
     err = ffio_fdopen(s, h);
     if (err < 0) {
         ffurl_close(h);

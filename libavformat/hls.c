@@ -50,6 +50,38 @@
 #define MPEG_TIME_BASE 90000
 #define MPEG_TIME_BASE_Q (AVRational){1, MPEG_TIME_BASE}
 
+//=============================hls数据结构层次分析=============================
+// 
+//                           |-- char *url: http://xxx.m3u8
+//                           |-- AVIOContext *bp: url对应的http响应报文读取io
+//                           |--
+//                           |--                                |-- AVFormatContext *ctx: 持有主上下文引用master
+//                           |--                                |--
+//                           |--                                |## 数组，每种码率对应一个variant             variant结构体含有一个playlist数组，[0]对应当前码率下的一个playlist
+//     #main context         |--                                |-- variant **variants: variant  ->   |-- playlist **playlists
+// AVFormatContext master -> |-- void *priv_data: HLSContext -> |-- 
+//                           |--                                |## 数组，每种码率对应一个playlist,可看作所有variants[0]的集合
+//                           |--                                |-- playlist **playlists: playlist -> |-- AVFormatContext *parent: 持有主上下文引用master
+//                           |--                                |--                                   |--
+//                           |--                                |--                                   |## 当前码率playlist上下文    
+//                           |--                                |--                                   |-- AVFormatContext *ctx -> |-- char *url: http://xxx.ts
+//                           |--                                |--                                   |--                         |-- AVIOContext *pb: 对应IO
+//                           |--                                |--                                   |--                         |-- Avoid *priv_data: MpegTSContext
+//                           |--                                |--                                   |--                         |-- AVInputFormat *iformat: ff_mpegts_demuxer
+//                           |--                                |--                                   |-- FFIOContext pb: segment分片读取IO,内部持有一个AVIOContext
+//                           |--                                |--                                   |-- AVIOContext *input: ?       http_multiple是一种类似于双缓冲的模式，
+//                           |--                                |--                                   |-- AVIOContext *input_next: ?  http_multiple是一种类似于双缓冲的模式，
+//                           |--                                |--                                   |-- segment **segments: 当前playlist下的分片数组
+//                           |--                                |--
+//                           |--                                |## 当前解析的playlist对应的IO，对于二级的m3u8会用到,当解析二级m3u8时首先使用对应url发起http请求，然后创建对应的响应报文读取IO
+//                           |--                                |-- AVIOContext *playlist_pb: 
+//                           |--
+//                           |--                                           |-- name:hls
+//                           |-- AVInputFormat *iformat: ff_hls_demuxer -> |-- read_probe: hls_probe
+//                           |--                                           |-- read_header: hls_read_header
+//                           |--                                           |-- read_packet: hls_read_packet
+//                           |--                                           |-- read_seek: hls_read_seek
+
 /*
  * An apple http stream consists of a playlist with media segment files,
  * played sequentially. There may be several playlists with the same
@@ -62,18 +94,21 @@
  * one anonymous toplevel variant for this, to maintain the structure.
  */
 
+//加密算法
 enum KeyType {
     KEY_NONE,
     KEY_AES_128,
     KEY_SAMPLE_AES
 };
 
+//hls分片（ts）
 struct segment {
-    int64_t duration;
-    int64_t url_offset;
-    int64_t size;
-    char *url;
-    char *key;
+    int64_t duration;   //时长
+    int64_t url_offset; //在url资源中的偏移
+    int64_t size;       //大小size
+    char *url;          //url
+    //加密相关
+    char *key;          
     enum KeyType key_type;
     uint8_t iv[16];
     /* associated Media Initialization Section, treated as a segment */
@@ -84,8 +119,8 @@ struct rendition;
 
 enum PlaylistType {
     PLS_TYPE_UNSPECIFIED,
-    PLS_TYPE_EVENT,
-    PLS_TYPE_VOD
+    PLS_TYPE_EVENT, //直播
+    PLS_TYPE_VOD    //点播
 };
 
 /*
@@ -97,19 +132,19 @@ struct playlist {
     char url[MAX_URL_SIZE];
     FFIOContext pb;
     uint8_t* read_buffer;
-    AVIOContext *input;
+    AVIOContext *input;       //当前要读取的segment
     int input_read_done;
-    AVIOContext *input_next;
+    AVIOContext *input_next;  //下一个将要读取的segment
     int input_next_requested;
-    AVFormatContext *parent;
+    AVFormatContext *parent;  //指向公用的AVFormatContext
     int index;
-    AVFormatContext *ctx;
+    AVFormatContext *ctx;     //用于解析当前playlist
     AVPacket *pkt;
     int has_noheader_flag;
 
     /* main demuxer streams associated with this playlist
      * indexed by the subdemuxer stream indexes */
-    AVStream **main_streams;
+    AVStream **main_streams;   //当前playlist中包含的AVStream信息
     int n_main_streams;
 
     int finished;
@@ -117,11 +152,11 @@ struct playlist {
     int64_t target_duration;
     int64_t start_seq_no;
     int n_segments;
-    struct segment **segments;
+    struct segment **segments;  //当前playlist中的segment数组
     int needed;
     int broken;
-    int64_t cur_seq_no;
-    int64_t last_seq_no;
+    int64_t cur_seq_no;         //当前播放序列号
+    int64_t last_seq_no;        
     int m3u8_hold_counters;
     int64_t cur_seg_offset;
     int64_t last_load_time;
@@ -133,6 +168,7 @@ struct playlist {
     unsigned int init_sec_data_len;
     unsigned int init_sec_buf_read_offset;
 
+    //加解密相关
     char key_url[MAX_URL_SIZE];
     uint8_t key[16];
 
@@ -150,6 +186,7 @@ struct playlist {
 
     HLSAudioSetupInfo audio_setup_info;
 
+    //seek相关
     int64_t seek_timestamp;
     int seek_flags;
     int seek_stream_index; /* into subdemuxer stream array */
@@ -194,19 +231,20 @@ struct variant {
     char subtitles_group[MAX_FIELD_LEN];
 };
 
+//hls上下文
 typedef struct HLSContext {
     AVClass *class;
     AVFormatContext *ctx;
     int n_variants;
-    struct variant **variants;
+    struct variant **variants;      //多码率适配时master playlist中有多个variants,即二级的m3u8
     int n_playlists;
-    struct playlist **playlists;
+    struct playlist **playlists;    //playlist列表，如果是二级m3u8,则[0]是master playlist
     int n_renditions;
     struct rendition **renditions;
 
-    int64_t cur_seq_no;
+    int64_t cur_seq_no;        //当前播放序列号
     int m3u8_hold_counters;
-    int live_start_index;
+    int live_start_index;      //可以设置从哪个序列号开始播放
     int first_packet;
     int64_t first_timestamp;
     int64_t cur_timestamp;
@@ -322,6 +360,7 @@ static struct playlist *new_playlist(HLSContext *c, const char *url,
     pls->is_id3_timestamped = -1;
     pls->id3_mpegts_timestamp = AV_NOPTS_VALUE;
 
+    //将playlist添加到HLSContext上下文playlist列表中
     dynarray_add(&c->playlists, &c->n_playlists, pls);
     return pls;
 }
@@ -340,14 +379,17 @@ static struct variant *new_variant(HLSContext *c, struct variant_info *info,
     struct variant *var;
     struct playlist *pls;
 
+    //创建playlist,特别注意：创建的playlist被添加到了HLSContext上下文的playlists列表中
     pls = new_playlist(c, url, base);
     if (!pls)
         return NULL;
 
+    //创建variant
     var = av_mallocz(sizeof(struct variant));
     if (!var)
         return NULL;
 
+    //将信息拷贝到variant
     if (info) {
         var->bandwidth = atoi(info->bandwidth);
         strcpy(var->audio_group, info->audio);
@@ -355,7 +397,9 @@ static struct variant *new_variant(HLSContext *c, struct variant_info *info,
         strcpy(var->subtitles_group, info->subtitles);
     }
 
+    //将variant添加到HLSContext上下文的variant列表
     dynarray_add(&c->variants, &c->n_variants, var);
+    //将playlist添加到variant的playlist列表
     dynarray_add(&var->playlists, &var->n_playlists, pls);
     return var;
 }
@@ -715,6 +759,7 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
     return ret;
 }
 
+//对m3u8的解析不是很复杂，但是需要对协议比较了解，有待详细研究
 static int parse_playlist(HLSContext *c, const char *url,
                           struct playlist *pls, AVIOContext *in)
 {
@@ -738,6 +783,9 @@ static int parse_playlist(HLSContext *c, const char *url,
     int prev_n_segments = 0;
     int64_t prev_start_seq_no = -1;
 
+    //注意这里之所以会再次创建http连接并创建AVIO，是因为m3u8多码率的情况下有二级m3u8,
+    //解析一级master playlist时获取了二级m3u8地址，并没有下载，所以当解析二级m3u8时需要根据url下载m3u8文件
+    //打开http连接
     if (is_http && !in && c->http_persistent && c->playlist_pb) {
         in = c->playlist_pb;
         ret = open_url_keepalive(c->ctx, &c->playlist_pb, url, NULL);
@@ -752,33 +800,40 @@ static int parse_playlist(HLSContext *c, const char *url,
         }
     }
 
+    //创建用于http请求的AVIO?
     if (!in) {
         AVDictionary *opts = NULL;
         av_dict_copy(&opts, c->avio_opts, 0);
 
         if (c->http_persistent)
             av_dict_set(&opts, "multiple_requests", "1", 0);
-
+        //创建AVIO
         ret = c->ctx->io_open(c->ctx, &in, url, AVIO_FLAG_READ, &opts);
         av_dict_free(&opts);
         if (ret < 0)
             return ret;
 
+        //关联对应的playlist
         if (is_http && c->http_persistent)
             c->playlist_pb = in;
         else
             close_in = 1;
     }
 
+    //重定向
     if (av_opt_get(in, "location", AV_OPT_SEARCH_CHILDREN, &new_url) >= 0)
         url = new_url;
 
+    //读取一行
     ff_get_chomp_line(in, line, sizeof(line));
+    //如果有#EXTM3U则说明是m3u8文件
     if (strcmp(line, "#EXTM3U")) {
         ret = AVERROR_INVALIDDATA;
         goto fail;
     }
 
+    //todo 和m3u8文件更新相关?
+    //第一次进来pls是null
     if (pls) {
         prev_start_seq_no = pls->start_seq_no;
         prev_segments = pls->segments;
@@ -789,14 +844,21 @@ static int parse_playlist(HLSContext *c, const char *url,
         pls->finished = 0;
         pls->type = PLS_TYPE_UNSPECIFIED;
     }
+    //开始解析m3u8各个tag
+    //定位到tag的:后的位置
     while (!avio_feof(in)) {
         ff_get_chomp_line(in, line, sizeof(line));
+        //嵌套的m3u8
+        //注意这里的逻辑，如果是master playlist,那么第一次调用parse_playlist实际只解析了这个tag以及对应的二级m3u8的url
         if (av_strstart(line, "#EXT-X-STREAM-INF:", &ptr)) {
             is_variant = 1;
             memset(&variant_info, 0, sizeof(variant_info));
+            //解析tag后面的码率等信息存储到variant_info结构体,为后面解析tag的下一行二级m3u8使用
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_variant_args,
                                &variant_info);
-        } else if (av_strstart(line, "#EXT-X-KEY:", &ptr)) {
+        }
+        //加密相关
+        else if (av_strstart(line, "#EXT-X-KEY:", &ptr)) {
             struct key_info info = {{0}};
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_key_args,
                                &info);
@@ -811,17 +873,23 @@ static int parse_playlist(HLSContext *c, const char *url,
                 has_iv = 1;
             }
             av_strlcpy(key, info.uri, sizeof(key));
-        } else if (av_strstart(line, "#EXT-X-MEDIA:", &ptr)) {
+        } 
+        //media,⽤来在 Playlist 中表示相同内容的不同语种/译⽂的版本，⽐如可以通过使⽤ 3个这种 tag 表示 3 种不同语⾳的⾳频，或者⽤ 2 个这个 tag 表示不同⻆度的 video
+        else if (av_strstart(line, "#EXT-X-MEDIA:", &ptr)) {
             struct rendition_info info = {{0}};
             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_rendition_args,
                                &info);
             new_rendition(c, &info, url);
-        } else if (av_strstart(line, "#EXT-X-TARGETDURATION:", &ptr)) {
+        } 
+        //最大分片时长
+        else if (av_strstart(line, "#EXT-X-TARGETDURATION:", &ptr)) {
             ret = ensure_playlist(c, &pls, url);
             if (ret < 0)
                 goto fail;
             pls->target_duration = strtoll(ptr, NULL, 10) * AV_TIME_BASE;
-        } else if (av_strstart(line, "#EXT-X-MEDIA-SEQUENCE:", &ptr)) {
+        } 
+        //当前playlist起始序号
+        else if (av_strstart(line, "#EXT-X-MEDIA-SEQUENCE:", &ptr)) {
             uint64_t seq_no;
             ret = ensure_playlist(c, &pls, url);
             if (ret < 0)
@@ -833,7 +901,9 @@ static int parse_playlist(HLSContext *c, const char *url,
                 seq_no &= INT64_MAX;
             }
             pls->start_seq_no = seq_no;
-        } else if (av_strstart(line, "#EXT-X-PLAYLIST-TYPE:", &ptr)) {
+        } 
+        //直播/点播类型
+        else if (av_strstart(line, "#EXT-X-PLAYLIST-TYPE:", &ptr)) {
             ret = ensure_playlist(c, &pls, url);
             if (ret < 0)
                 goto fail;
@@ -841,7 +911,9 @@ static int parse_playlist(HLSContext *c, const char *url,
                 pls->type = PLS_TYPE_EVENT;
             else if (!strcmp(ptr, "VOD"))
                 pls->type = PLS_TYPE_VOD;
-        } else if (av_strstart(line, "#EXT-X-MAP:", &ptr)) {
+        } 
+        //map 和加密相关?
+        else if (av_strstart(line, "#EXT-X-MAP:", &ptr)) {
             struct init_section_info info = {{0}};
             ret = ensure_playlist(c, &pls, url);
             if (ret < 0)
@@ -879,33 +951,58 @@ static int parse_playlist(HLSContext *c, const char *url,
                 cur_init_section->key = NULL;
             }
 
-        } else if (av_strstart(line, "#EXT-X-ENDLIST", &ptr)) {
+        } 
+        //指示点播文件结束
+        else if (av_strstart(line, "#EXT-X-ENDLIST", &ptr)) {
             if (pls)
                 pls->finished = 1;
-        } else if (av_strstart(line, "#EXTINF:", &ptr)) {
+        } 
+        //对应分片的时长也描述
+        else if (av_strstart(line, "#EXTINF:", &ptr)) {
+            //is_segment = 1,下一行就是一个sgment
             is_segment = 1;
             duration   = atof(ptr) * AV_TIME_BASE;
-        } else if (av_strstart(line, "#EXT-X-BYTERANGE:", &ptr)) {
+        } 
+        //分配大小,url资源地址偏移
+        else if (av_strstart(line, "#EXT-X-BYTERANGE:", &ptr)) {
             seg_size = strtoll(ptr, NULL, 10);
             ptr = strchr(ptr, '@');
             if (ptr)
                 seg_offset = strtoll(ptr+1, NULL, 10);
-        } else if (av_strstart(line, "#", NULL)) {
+        } 
+        //如果是注释则直接跳过
+        else if (av_strstart(line, "#", NULL)) {
             av_log(c->ctx, AV_LOG_INFO, "Skip ('%s')\n", line);
             continue;
-        } else if (line[0]) {
+        } 
+        //m3u8文件中除了上面的#EXT-xxx这些tag，剩下的内容解析、
+        //比如livestream-422.ts 或者http://example.com/hi.m3u8
+        else if (line[0]) {
+            //是一个二级m3u8，即http://example.com/hi.m3u8这样的
+            //如果是master playlist,在解析#EXT-X-STREAM-INF tag时is_variant被置1了，
+            //当解析下一行时就会进入到这里,于是这里就会创建一个variant
             if (is_variant) {
+                //添加playlist,variant_info信息在前面解析获得,这个函数所做的工作创建了什么变量对理解非常重要，看里面的注释
                 if (!new_variant(c, &variant_info, line, url)) {
                     ret = AVERROR(ENOMEM);
                     goto fail;
                 }
+                //重置标志
                 is_variant = 0;
             }
+            //是一个ts分片，如livestream-422.ts
             if (is_segment) {
                 struct segment *seg;
+                //ensure_playlist确保playlist存在，如果没有则创建,当解析一级master playlist 或解析单码率第一次调用时肯定是空的
+                //当解析二级m3u8时playlist就是非空的了（因为在解析master playlist是创建了），那么就往里面填充解析的数据就行了
+                //特别注意，在创建playlist的时候这个函数内部调用了new_variant,也就是说如果是单码率也会有一个对应的variant
+                //因此在结合ensure_playlist和new_variant函数，HLSContext中的,variants和playlists列表的含义就非常清楚了
+                //variants:代表一种适配的码率，它内部也有一个playlists,它[0]索引代表当前码率的ts播放列表playlist
+                //playlists(HLSContext中的):它保存了所有适配码率的playlist,实际就是所有variants::playlists[0]的集合
                 ret = ensure_playlist(c, &pls, url);
                 if (ret < 0)
                     goto fail;
+                //创建出一个segment结构体,并解析各个属性
                 seg = av_malloc(sizeof(struct segment));
                 if (!seg) {
                     ret = AVERROR(ENOMEM);
@@ -936,6 +1033,7 @@ static int parse_playlist(HLSContext *c, const char *url,
                     seg->key = NULL;
                 }
 
+                //将livestream-422.ts拼接成绝对路径，http://xxx.xxx.xxx.xxx:8081/live/livestream-422.ts
                 ff_make_absolute_url(tmp_str, sizeof(tmp_str), url, line);
                 if (!tmp_str[0]) {
                     ret = AVERROR_INVALIDDATA;
@@ -944,6 +1042,7 @@ static int parse_playlist(HLSContext *c, const char *url,
                     av_free(seg);
                     goto fail;
                 }
+                //url
                 seg->url = av_strdup(tmp_str);
                 if (!seg->url) {
                     av_free(seg->key);
@@ -957,11 +1056,13 @@ static int parse_playlist(HLSContext *c, const char *url,
                                     " set to default value to 1ms.\n", seg->url);
                     duration = 0.001 * AV_TIME_BASE;
                 }
+                //分片时长，key
                 seg->duration = duration;
                 seg->key_type = key_type;
                 dynarray_add(&pls->segments, &pls->n_segments, seg);
                 is_segment = 0;
 
+                //分片大小,url资源地址偏移等
                 seg->size = seg_size;
                 if (seg_size >= 0) {
                     seg->url_offset = seg_offset;
@@ -976,6 +1077,7 @@ static int parse_playlist(HLSContext *c, const char *url,
             }
         }
     }
+    //todo 和m3u8文件更新相关?
     if (prev_segments) {
         if (pls->start_seq_no > prev_start_seq_no && c->first_timestamp != AV_NOPTS_VALUE) {
             int64_t prev_timestamp = c->first_timestamp;
@@ -992,9 +1094,11 @@ static int parse_playlist(HLSContext *c, const char *url,
             av_log(c->ctx, AV_LOG_WARNING, "Media sequence changed unexpectedly: %"PRId64" -> %"PRId64"\n",
                    prev_start_seq_no, pls->start_seq_no);
         }
+        //释放prev_segments
         free_segment_dynarray(prev_segments, prev_n_segments);
         av_freep(&prev_segments);
     }
+    //解析完成之后记录playlist的更新时间，在直播定期更新playlist时会用到
     if (pls)
         pls->last_load_time = av_gettime_relative();
 
@@ -1436,6 +1540,7 @@ static int playlist_needed(struct playlist *pls)
     return 0;
 }
 
+//定期读取m3u8更新playlist，然后读取ts里面的packet
 static int read_data(void *opaque, uint8_t *buf, int buf_size)
 {
     struct playlist *v = opaque;
@@ -1446,12 +1551,16 @@ static int read_data(void *opaque, uint8_t *buf, int buf_size)
     struct segment *seg;
 
 restart:
+    //结束了，通常时点播
     if (!v->needed)
         return AVERROR_EOF;
 
+    //主要是读取m3u8更新playlist
+    //input_read_done = 1说明一个segment读取完毕了,否则说明有一个序号的segment还在读取当中，这种情况不需要更新playlist
     if (!v->input || (c->http_persistent && v->input_read_done)) {
         int64_t reload_interval;
 
+        //先check是否需要更新
         /* Check that the playlist is still needed before opening a new
          * segment. */
         v->needed = playlist_needed(v);
@@ -1464,13 +1573,18 @@ restart:
 
         /* If this is a live stream and the reload interval has elapsed since
          * the last playlist reload, reload the playlists now. */
+        //更新间隔，对于直播流需要定期更新playlist,通常等于一个segment的时长
         reload_interval = default_reload_interval(v);
 
 reload:
+        //重试次数控制
         reload_count++;
         if (reload_count > c->max_reload)
             return AVERROR_EOF;
+        //直播流！finished,点播不会进if
         if (!v->finished &&
+            //如果距离上次更新的时差大于更新时间间隔reload_interval则调用parse_playlist读取m3u8文件更新playlist
+            //更新完成后parse_playlist会记录更新时间last_load_time
             av_gettime_relative() - v->last_load_time >= reload_interval) {
             if ((ret = parse_playlist(c, v->url, v, NULL)) < 0) {
                 if (ret != AVERROR_EXIT)
@@ -1481,8 +1595,12 @@ reload:
             /* If we need to reload the playlist again below (if
              * there's still no more segments), switch to a reload
              * interval of half the target duration. */
+            //如果需要再次更新，则更新时间减半
             reload_interval = v->target_duration / 2;
         }
+        //cur_seq_no代表当前需要更新的分片序号，当从url中获取到segment后cur_seq_no++
+        //更新之后如果发现cur_seq_no比更新后的起始序号还要小，通常对于直播流暂停时会发生
+        //比如cur_seq_no = 10,更新playlist后的起始序号是15,则让cur_seq_no = start_seq_no
         if (v->cur_seq_no < v->start_seq_no) {
             av_log(v->parent, AV_LOG_WARNING,
                    "skipping %"PRId64" segments ahead, expired from playlists\n",
@@ -1500,9 +1618,13 @@ reload:
         } else {
             av_log(v->parent, AV_LOG_WARNING, "maybe the m3u8 list sequence have been wraped.\n");
         }
+        //如果需要更新的序号大于等于更新后的最后一个序号，通常是服务器还没有更新m3u8导致和原来的一样，
+        //这是就会goto reload,再次读取m3u8，需要注意上面会将更新间隔减半
         if (v->cur_seq_no >= v->start_seq_no + v->n_segments) {
             if (v->finished)
                 return AVERROR_EOF;
+            //如果还没到更新时间则sleep
+            //注意这里的interrupt_callback，就是ffplay.c中设置的一个超时策略函数，可以中断当前的等待直接退出
             while (av_gettime_relative() - v->last_load_time < reload_interval) {
                 if (ff_check_interrupt(c->interrupt_callback))
                     return AVERROR_EXIT;
@@ -1512,7 +1634,10 @@ reload:
             goto reload;
         }
 
+        //走到这里说明已经更新到最新的playlist了
+        //也说明服务器已经生产了新的segment，下面就可以读取segment了
         v->input_read_done = 0;
+        //选择segment index
         seg = current_segment(v);
 
         /* load/update Media Initialization Section, if any */
@@ -1520,12 +1645,15 @@ reload:
         if (ret)
             return ret;
 
+        //http_multiple是一种类似于双缓冲的模式，
+        //需要用到playlist::input和playlist::input_next,这里不太好理解，需要仔细研究
         if (c->http_multiple == 1 && v->input_next_requested) {
             FFSWAP(AVIOContext *, v->input, v->input_next);
             v->cur_seg_offset = 0;
             v->input_next_requested = 0;
             ret = 0;
         } else {
+            //打开输入,这里应该就是要发起一个下载segment的http请求
             ret = open_input(c, v, seg, &v->input);
         }
         if (ret < 0) {
@@ -1540,6 +1668,7 @@ reload:
         just_opened = 1;
     }
 
+    //上面的if主要用于更新playlist,下面就是要开始下载对应序号的segment了
     if (c->http_multiple == -1) {
         uint8_t *http_version_opt = NULL;
         int r = av_opt_get(v->input, "http_version", AV_OPT_SEARCH_CHILDREN, &http_version_opt);
@@ -1572,6 +1701,7 @@ reload:
         return copy_size;
     }
 
+    //从io资源中读取segment,即从http响应io中读取
     seg = current_segment(v);
     ret = read_from_url(v, seg, buf, buf_size);
     if (ret > 0) {
@@ -1581,14 +1711,20 @@ reload:
             intercept_id3(v, buf, buf_size, &ret);
         }
 
+        //>0说明已经读取到数据了,直接返回
         return ret;
     }
-    if (c->http_persistent &&
+    //注意：当ret<=0 说明数据读取完毕了，ret>0说明读取到ret这么多的字节数，但是整个segment并没有读取完
+    //只有当整个segment读取完毕之后才需要往下走，更新序号
+    if (c->http_persistent && //keep-alive机制
         seg->key_type == KEY_NONE && av_strstart(seg->url, "http", NULL)) {
+        //一个segment读取完毕了，input_read_done置1
         v->input_read_done = 1;
     } else {
+        //如果没有开启keep-alive则关闭io
         ff_format_io_close(v->parent, &v->input);
     }
+    //走到这里说明当前需要更新的sgment更新完了，则序号++
     v->cur_seq_no++;
 
     c->cur_seq_no = v->cur_seq_no;
@@ -1849,6 +1985,11 @@ static int hls_close(AVFormatContext *s)
     return 0;
 }
 
+//解析m3u8文件，并打开第一个ts文件解析出pmt、pat等信息
+//理解不算透彻，还需要仔细研究
+//注意参数s是统领全文的AVFormatContext上下文,在最开始调用avformat_open_input打开http://xxx.m3u8网络流媒体文件时
+//发送了http请求报文，并创建了对应的读取IO：s->pb,因此解析m3u8的数据来源就是这个s->pb
+//而如果是多码率的二级m3u8，则在解析二级的m3u8是还需要再次发起http请求m3u8
 static int hls_read_header(AVFormatContext *s)
 {
     HLSContext *c = s->priv_data;
@@ -1870,17 +2011,35 @@ static int hls_read_header(AVFormatContext *s)
        the range header */
     av_dict_set_int(&c->avio_opts, "seekable", c->http_seekable, 0);
 
+    //解析m3u8文件到结构体HLSContext::playlist
+    //一：如果是master playlist,这里解析的就是第一级m3u8，它主要做了如下工作:
+    //1.对于每个#EXT-X-STREAM-INF：xxx标签，以及该标签下的二级m3u8 url http://xxx.m3u8,创建一个variant和playlist结构体
+    //2.解析数据到playlist并将其添加到HLSContext上下文的playlists列表中
+    //3.解析数据到variant并将其添加的HLSContext上下文的variant列表中
+    //4.将playlist添加到variant的playlists列表中
+    //二：如果是单码率只有一级m3u8，它主要做了如下工作:
+    //1.创建一个variant和playlist结构体
+    //2.执行一中的2、3、4
     if ((ret = parse_playlist(c, s->url, NULL, s->pb)) < 0)
         return ret;
 
+    //HLSContext中的,variants和playlists列表的含义就非常清楚了
+    //variants:代表一种适配的码率，它内部也有一个playlists,它[0]索引代表当前码率的ts播放列表playlist
+    //playlists(HLSContext中的):它保存了所有适配码率的playlist,实际就是所有variants::playlists[0]的集合
+    //结合上面的分析，一定会有一个variant
     if (c->n_variants == 0) {
         av_log(s, AV_LOG_WARNING, "Empty playlist\n");
         return AVERROR_EOF;
     }
     /* If the playlist only contained playlists (Master Playlist),
      * parse each individual playlist. */
+    //多码率适配中m3u8文件是二级的，继续解析第二级m3u8文件
+    //经过上一个parse_playlist并结合上面的分析>1说明就是master playlist了
+    //第二个||，假如master playlist只有一种码率，那么n_playlists也会等于1,所以需要再判断[0]的segments数量，
     if (c->n_playlists > 1 || c->playlists[0]->n_segments == 0) {
         for (i = 0; i < c->n_playlists; i++) {
+            //到这一步，取出来的每个playlist实际并没有获得完整的数据，还需要下载二级的http://xxx.mu38文件进行解析，然后补全数据
+            //所以需要再次调用parse_playlist解析二级m3u8
             struct playlist *pls = c->playlists[i];
             pls->m3u8_hold_counters = 0;
             if ((ret = parse_playlist(c, pls->url, pls, NULL)) < 0) {
@@ -1893,6 +2052,7 @@ static int hls_read_header(AVFormatContext *s)
         }
     }
 
+    //检查每种适配码率的主playlist是否拥有空的segment
     for (i = 0; i < c->n_variants; i++) {
         if (c->variants[i]->playlists[0]->n_segments == 0) {
             av_log(s, AV_LOG_WARNING, "Empty segment [%s]\n", c->variants[i]->playlists[0]->url);
@@ -1902,6 +2062,7 @@ static int hls_read_header(AVFormatContext *s)
 
     /* If this isn't a live stream, calculate the total duration of the
      * stream. */
+    //如果不是直播流，如点播，计算总时长
     if (c->variants[0]->playlists[0]->finished) {
         int64_t duration = 0;
         for (i = 0; i < c->variants[0]->playlists[0]->n_segments; i++)
@@ -1910,6 +2071,7 @@ static int hls_read_header(AVFormatContext *s)
     }
 
     /* Associate renditions with variants */
+    //对每种适配码率的variant添加renditions,what is reditions ???
     for (i = 0; i < c->n_variants; i++) {
         struct variant *var = c->variants[i];
 
@@ -1922,6 +2084,7 @@ static int hls_read_header(AVFormatContext *s)
     }
 
     /* Create a program for each variant */
+    //每个variant对应一个program,即每种不同码率的对应一个program，应该和ts中的节目不是一个概念
     for (i = 0; i < c->n_variants; i++) {
         struct variant *v = c->variants[i];
         AVProgram *program;
@@ -1933,17 +2096,20 @@ static int hls_read_header(AVFormatContext *s)
     }
 
     /* Select the starting segments */
+    //挑选playlist,设置每种码率的起始播放序号
     for (i = 0; i < c->n_playlists; i++) {
         struct playlist *pls = c->playlists[i];
 
         if (pls->n_segments == 0)
             continue;
 
+        //选择起始播放序列号,需要研究其select的策略和算法
         pls->cur_seq_no = select_cur_seq_no(c, pls);
         highest_cur_seq_no = FFMAX(highest_cur_seq_no, pls->cur_seq_no);
     }
 
     /* Open the demuxer for each playlist */
+    //对每个playlist打开一个demuxer,即ff_mpegts_demuxer
     for (i = 0; i < c->n_playlists; i++) {
         struct playlist *pls = c->playlists[i];
         const AVInputFormat *in_fmt = NULL;
@@ -1951,15 +2117,16 @@ static int hls_read_header(AVFormatContext *s)
         AVDictionary *options = NULL;
         struct segment *seg = NULL;
 
+        //每种码率对于一个avformat上下文
         if (!(pls->ctx = avformat_alloc_context()))
             return AVERROR(ENOMEM);
 
         if (pls->n_segments == 0)
             continue;
 
-        pls->index  = i;
-        pls->needed = 1;
-        pls->parent = s;
+        pls->index  = i; //当前playlist编号
+        pls->needed = 1; //有segment才置为1
+        pls->parent = s; //设置从属复用器
 
         /*
          * If this is a live stream and this playlist looks like it is one segment
@@ -1980,6 +2147,9 @@ static int hls_read_header(AVFormatContext *s)
             return AVERROR(ENOMEM);
         }
 
+        //read_data是真正的数据读取函数
+        //注意这里的read_data是定义segment分片的读取io
+        //INITIAL_BUFFER_SIZE每次读32k
         ffio_init_context(&pls->pb, pls->read_buffer, INITIAL_BUFFER_SIZE, 0, pls,
                           read_data, NULL, NULL);
 
@@ -2032,6 +2202,7 @@ static int hls_read_header(AVFormatContext *s)
             pls->ctx->max_analyze_duration = s->max_analyze_duration > 0 ? s->max_analyze_duration : 4 * AV_TIME_BASE;
             pls->ctx->interrupt_callback = s->interrupt_callback;
             url = av_strdup(pls->segments[0]->url);
+            //根据上面创建的segment读取IO，调用read_data读取第0片探测解复用为 ff_mpegts_demuxer,即ts的解复用器
             ret = av_probe_input_buffer(&pls->pb.pub, &in_fmt, url, NULL, 0, 0);
             if (ret < 0) {
                 /* Free the ctx - it isn't initialized properly at this point,
@@ -2071,6 +2242,7 @@ static int hls_read_header(AVFormatContext *s)
 
         av_dict_copy(&options, c->seg_format_opts, 0);
 
+        //打开流，从中获取AVStream信息,打开第0片文件，分析出pat pmt
         ret = avformat_open_input(&pls->ctx, pls->segments[0]->url, in_fmt, &options);
         av_dict_free(&options);
         if (ret < 0)
@@ -2097,6 +2269,7 @@ static int hls_read_header(AVFormatContext *s)
                 pls->ctx->nb_streams == 1)
                 ret = ff_hls_senc_parse_audio_setup_info(pls->ctx->streams[0], &pls->audio_setup_info);
             else
+                //分析音视频成分
                 ret = avformat_find_stream_info(pls->ctx, NULL);
 
             if (ret < 0)
@@ -2106,6 +2279,7 @@ static int hls_read_header(AVFormatContext *s)
         pls->has_noheader_flag = !!(pls->ctx->ctx_flags & AVFMTCTX_NOHEADER);
 
         /* Create new AVStreams for each stream in this playlist */
+        //将分析出来的流成分更新给parent demux,s对应ff_hls_demuxer，而每个pls对应一个ff_mpegts_demuxer
         ret = update_streams_from_subdemuxer(s, pls);
         if (ret < 0)
             return ret;
@@ -2209,6 +2383,7 @@ static int compare_ts_with_wrapdetect(int64_t ts_a, struct playlist *pls_a,
     return av_compare_mod(scaled_ts_a, scaled_ts_b, 1LL << 33);
 }
 
+//hls packet读取函数
 static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
 {
     HLSContext *c = s->priv_data;
@@ -2226,6 +2401,9 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
                 int64_t ts_diff;
                 AVRational tb;
                 struct segment *seg = NULL;
+                //传递到具体的playlist对应的read函数
+                //最用又会调用playlist上下文对应的AVInputFormat::read_packet
+                //即ff_mpegts_denuxer::read_packet
                 ret = av_read_frame(pls->ctx, pls->pkt);
                 if (ret < 0) {
                     if (!avio_feof(&pls->pb.pub) && ret != AVERROR_EOF)
