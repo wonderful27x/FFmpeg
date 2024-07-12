@@ -24,8 +24,7 @@
 #include "h264_ps.h"
 #include "hwconfig.h"
 #include "vaapi_decode.h"
-/* #include <stdio.h> */
-av_log
+#define AV_LOG(...) av_log(NULL, AV_LOG_FATAL, __VA_ARGS__)
 
 /**
  * @file
@@ -233,15 +232,16 @@ static void PrintVAPictureH264(const VAPictureH264 *vapic)
     AV_LOG("BottomFieldOrderCnt: %d\n", vapic->BottomFieldOrderCnt);
 }
 
+static int pic_parma_count = 0;
 static void PrintVAPictureParameterBufferH264(const VAPictureParameterBufferH264 *pic_param)
 {
-    AV_LOG("VAPictureParameterBufferH264:\n");                
+    AV_LOG("==========VAPictureParameterBufferH264-%d:\n", pic_parma_count++);                
     AV_LOG("picture_width_in_mbs_minus1: %d\n", pic_param->picture_width_in_mbs_minus1);                
     AV_LOG("picture_height_in_mbs_minus1: %d\n", pic_param->picture_height_in_mbs_minus1);               
     AV_LOG("bit_depth_luma_minus8: %d\n", pic_param->bit_depth_luma_minus8);                      
     AV_LOG("bit_depth_chroma_minus8: %d\n", pic_param->bit_depth_chroma_minus8);                    
     AV_LOG("num_ref_frames: %d\n", pic_param->num_ref_frames);                             
-        AV_LOG("chroma_format_idc: %d\n", pic_param->bits.chroma_format_idc);                      
+        AV_LOG("chroma_format_idc: %d\n", pic_param->seq_fields.bits.chroma_format_idc);                      
         AV_LOG("residual_colour_transform_flag: %d\n", pic_param->seq_fields.bits.residual_colour_transform_flag);         
         AV_LOG("gaps_in_frame_num_value_allowed_flag: %d\n", pic_param->seq_fields.bits.gaps_in_frame_num_value_allowed_flag);   
         AV_LOG("frame_mbs_only_flag: %d\n", pic_param->seq_fields.bits.frame_mbs_only_flag);                    
@@ -273,6 +273,8 @@ static void PrintVAPictureParameterBufferH264(const VAPictureParameterBufferH264
     AV_LOG("ReferenceFrames: \n");                                  
     for(int i=0; i<16; ++i)
     {
+        if(pic_param->ReferenceFrames[i].picture_id == VA_INVALID_ID) break;
+        AV_LOG("=====%d=====\n", i);                                  
         PrintVAPictureH264(&pic_param->ReferenceFrames[i]);
     }
 }
@@ -325,9 +327,10 @@ static void PrintVAIQMatrixBufferH264(VAIQMatrixBufferH264 *matrix)
     AV_LOG("\n");
 }
 
+static int slice_parma_count = 0;
 static void PrintVASliceParameterBufferH264(const VASliceParameterBufferH264 *slice_param)
 {
-    AV_LOG("VASliceParameterBufferH264:\n");
+    AV_LOG("==========VASliceParameterBufferH264-%d:\n", slice_parma_count++);
     AV_LOG("slice_data_size: %d\n", slice_param->slice_data_size);
     AV_LOG("slice_data_offset: %d\n", slice_param->slice_data_offset);
     AV_LOG("slice_data_flag: %d\n", slice_param->slice_data_flag);
@@ -345,88 +348,152 @@ static void PrintVASliceParameterBufferH264(const VASliceParameterBufferH264 *sl
     AV_LOG("luma_log2_weight_denom: %d\n", slice_param->luma_log2_weight_denom);
     AV_LOG("chroma_log2_weight_denom: %d\n", slice_param->chroma_log2_weight_denom);
 
-    AV_LOG("luma_weight_l0:\n");
+    AV_LOG("luma_weight_l0  : ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->luma_weight_l0[i]);
     }
     AV_LOG("\n");
-    AV_LOG("luma_offset_l0:\n");
+    AV_LOG("luma_offset_l0  : ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->luma_offset_l0[i]);
     }
     AV_LOG("\n");
 
-    AV_LOG("chroma_weight_l0:\n");
+    AV_LOG("chroma_weight_l0: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_weight_l0[i][0]);
     }
-    AV_LOG("chroma_weight_l0:\n");
+    AV_LOG("\n");
+    AV_LOG("chroma_weight_l0: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_weight_l0[i][1]);
     }
     AV_LOG("\n");
-    AV_LOG("chroma_offset_l0:\n");
+    AV_LOG("chroma_offset_l0: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_offset_l0[i][0]);
     }
-    AV_LOG("chroma_offset_l0:\n");
+    AV_LOG("\n");
+    AV_LOG("chroma_offset_l0: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_offset_l0[i][1]);
     }
     AV_LOG("\n");
     // ---------------------------------------------------
-    AV_LOG("luma_weight_l1:\n");
+    AV_LOG("luma_weight_l1  : ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->luma_weight_l1[i]);
     }
     AV_LOG("\n");
-    AV_LOG("luma_offset_l1:\n");
+    AV_LOG("luma_offset_l1  : ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->luma_offset_l1[i]);
     }
     AV_LOG("\n");
 
-    AV_LOG("chroma_weight_l1:\n");
+    AV_LOG("chroma_weight_l1: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_weight_l1[i][0]);
     }
-    AV_LOG("chroma_weight_l1:\n");
+    AV_LOG("\n");
+    AV_LOG("chroma_weight_l1: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_weight_l1[i][1]);
     }
     AV_LOG("\n");
-    AV_LOG("chroma_offset_l1:\n");
+    AV_LOG("chroma_offset_l1: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_offset_l1[i][0]);
     }
-    AV_LOG("chroma_offset_l1:\n");
+    AV_LOG("\n");
+    AV_LOG("chroma_offset_l1: ");
     for(int i=0; i<32; ++i)
     {
         AV_LOG("%d,", slice_param->chroma_offset_l1[i][1]);
     }
     AV_LOG("\n");
 
+    int sizel0 = slice_param->num_ref_idx_l0_active_minus1 + 1;
+    int sizel1 = slice_param->num_ref_idx_l1_active_minus1 + 1;
     AV_LOG("RefPicList0:\n");
-    for(int i=0; i<32; ++i)
+    for(int i=0; i<sizel0; ++i)
     {
+        AV_LOG("=====%d=====\n", i);
         PrintVAPictureH264(&slice_param->RefPicList0[i]);
     }
     AV_LOG("RefPicList1:\n");
-    for(int i=0; i<32; ++i)
+    for(int i=0; i<sizel1; ++i)
     {
+        AV_LOG("=====%d=====\n", i);
         PrintVAPictureH264(&slice_param->RefPicList1[i]);
     }
+}
+
+static void PrintScaleMatrix(uint8_t ScalingList4x4[6][16], uint8_t ScalingList8x8[6][64])
+{
+    AV_LOG("=========ScalingList4x4:\n");
+    for(int i=0; i<16; ++i)
+    {
+      AV_LOG("%d,", ScalingList4x4[0][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+      AV_LOG("%d,", ScalingList4x4[1][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+      AV_LOG("%d,", ScalingList4x4[2][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+      AV_LOG("%d,", ScalingList4x4[3][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+      AV_LOG("%d,", ScalingList4x4[4][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+      AV_LOG("%d,", ScalingList4x4[5][i]);
+    }
+    AV_LOG("\n");
+    AV_LOG("=========ScalingList8x8:\n");
+    for(int i=0; i<64; ++i)
+    {
+      AV_LOG("%d,", ScalingList8x8[0][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+      AV_LOG("%d,", ScalingList8x8[1][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+      AV_LOG("%d,", ScalingList8x8[2][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+      AV_LOG("%d,", ScalingList8x8[3][i]);
+    }
+    AV_LOG("\n");
 }
 
 /** Initialize and start decoding a frame with VA API. */
@@ -508,6 +575,10 @@ static int vaapi_h264_start_frame(AVCodecContext          *avctx,
     // test
     PrintVAPictureParameterBufferH264(&pic_param);
     PrintVAIQMatrixBufferH264(&iq_matrix);
+    /* AV_LOG("=====pps scaling matrix=====\n"); */
+    /* PrintScaleMatrix(pps->scaling_matrix4, pps->scaling_matrix8); */
+    /* AV_LOG("=====sps scaling matrix=====\n"); */
+    /* PrintScaleMatrix(sps->scaling_matrix4, sps->scaling_matrix8); */
 
     if (err < 0)
         goto fail;

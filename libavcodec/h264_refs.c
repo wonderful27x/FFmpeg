@@ -847,6 +847,12 @@ int ff_h264_decode_ref_pic_marking(H264SliceContext *sl, GetBitContext *gb,
         sl->explicit_ref_marking = 1;
     } else {
         sl->explicit_ref_marking = get_bits1(gb);
+        // test
+        /* av_log(NULL, AV_LOG_ERROR, "==========================adaptive flag = %d\n", sl->explicit_ref_marking); */
+        if(sl->explicit_ref_marking)
+        {
+            /* av_log(NULL, AV_LOG_ERROR, "==========================adaptive flag = 1\n"); */
+        }
         if (sl->explicit_ref_marking) {
             for (i = 0; i < FF_ARRAY_ELEMS(sl->mmco); i++) {
                 MMCOOpcode opcode = get_ue_golomb_31(gb);
