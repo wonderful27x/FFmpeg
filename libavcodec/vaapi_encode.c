@@ -31,6 +31,10 @@
 #include "encode.h"
 #include "avcodec.h"
 
+#define PRINT_MESSAGE 1
+#include <inttypes.h>
+#include <libavutil/time.h>
+
 const AVCodecHWConfigInternal *const ff_vaapi_encode_hw_configs[] = {
     HW_CONFIG_ENCODER_FRAMES(VAAPI, VAAPI),
     NULL,
@@ -664,6 +668,11 @@ static int vaapi_encode_output(AVCodecContext *avctx,
     if (err < 0)
         return err;
 
+#if PRINT_MESSAGE
+    int64_t start_time, end_time;
+    start_time = av_gettime();
+#endif
+
     buf_list = NULL;
     vas = vaMapBuffer(ctx->hwctx->display, pic->output_buffer,
                       (void**)&buf_list);
@@ -673,6 +682,13 @@ static int vaapi_encode_output(AVCodecContext *avctx,
         err = AVERROR(EIO);
         goto fail;
     }
+
+#if PRINT_MESSAGE
+    end_time = av_gettime();
+    int64_t elapsed_time = end_time - start_time;
+    double elapsed_time_ms = elapsed_time / 1000.0;
+    av_log(avctx, AV_LOG_ERROR, "vaMapBuffer time: %f\n", elapsed_time_ms);
+#endif
 
     for (buf = buf_list; buf; buf = buf->next)
         total_size += buf->size;
