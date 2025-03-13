@@ -26,6 +26,8 @@
 #include "vaapi_decode.h"
 #define AV_LOG(...) av_log(NULL, AV_LOG_FATAL, __VA_ARGS__)
 
+#define PRINT_MESSAGE 0
+
 /**
  * @file
  * This file implements the glue code between FFmpeg's and VA API's
@@ -572,13 +574,14 @@ static int vaapi_h264_start_frame(AVCodecContext          *avctx,
                                             VAIQMatrixBufferType,
                                             &iq_matrix, sizeof(iq_matrix));
 
-    // test
+#if PRINT_MESSAGE
     PrintVAPictureParameterBufferH264(&pic_param);
     PrintVAIQMatrixBufferH264(&iq_matrix);
     /* AV_LOG("=====pps scaling matrix=====\n"); */
     /* PrintScaleMatrix(pps->scaling_matrix4, pps->scaling_matrix8); */
     /* AV_LOG("=====sps scaling matrix=====\n"); */
     /* PrintScaleMatrix(sps->scaling_matrix4, sps->scaling_matrix8); */
+#endif
 
     if (err < 0)
         goto fail;
@@ -662,8 +665,9 @@ static int vaapi_h264_decode_slice(AVCodecContext *avctx,
                                             &slice_param, sizeof(slice_param),
                                             buffer, size);
 
-    // test
+#if PRINT_MESSAGE
     PrintVASliceParameterBufferH264(&slice_param);
+#endif
 
     if (err) {
         ff_vaapi_decode_cancel(avctx, pic);

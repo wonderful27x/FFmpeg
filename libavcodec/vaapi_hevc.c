@@ -29,6 +29,382 @@
 #include "vaapi_decode.h"
 #include "vaapi_hevc.h"
 #include "h265_profile_level.h"
+#define AV_LOG(...) av_log(NULL, AV_LOG_FATAL, __VA_ARGS__)
+
+#define PRINT_MESSAGE 0
+
+static int PIC_PARAMS_COUNT = 0;
+static int SLICE_PARAMS_COUNT = 0;
+
+static void PrintVAPictureHEVC(const VAPictureHEVC *vapic)
+{
+    AV_LOG("picture_id: %d\n", vapic->picture_id);
+    AV_LOG("pic_order_cnt: %d\n", vapic->pic_order_cnt);
+    AV_LOG("flags: %d\n", vapic->flags);
+}
+
+static void PrintVAPictureParameterBufferHEVC(const VAPictureParameterBufferHEVC *pic_params)
+{
+    AV_LOG("==========VAPictureParameterBufferHEVC-%d:\n", PIC_PARAMS_COUNT++);
+    AV_LOG("pic_width_in_luma_samples: %d\n", pic_params->pic_width_in_luma_samples);
+    AV_LOG("pic_height_in_luma_samples: %d\n", pic_params->pic_height_in_luma_samples);
+    // ----------------------------------------------------------------------------------
+    AV_LOG("chroma_format_idc: %d\n", pic_params->pic_fields.bits.chroma_format_idc);
+    AV_LOG("separate_colour_plane_flag: %d\n", pic_params->pic_fields.bits.separate_colour_plane_flag);
+    AV_LOG("pcm_enabled_flag: %d\n", pic_params->pic_fields.bits.pcm_enabled_flag);
+    AV_LOG("scaling_list_enabled_flag: %d\n", pic_params->pic_fields.bits.scaling_list_enabled_flag);
+    AV_LOG("transform_skip_enabled_flag: %d\n", pic_params->pic_fields.bits.transform_skip_enabled_flag);
+    AV_LOG("amp_enabled_flag: %d\n", pic_params->pic_fields.bits.amp_enabled_flag);
+    AV_LOG("strong_intra_smoothing_enabled_flag: %d\n", pic_params->pic_fields.bits.strong_intra_smoothing_enabled_flag);
+    AV_LOG("sign_data_hiding_enabled_flag: %d\n", pic_params->pic_fields.bits.sign_data_hiding_enabled_flag);
+    AV_LOG("constrained_intra_pred_flag: %d\n", pic_params->pic_fields.bits.constrained_intra_pred_flag);
+    AV_LOG("cu_qp_delta_enabled_flag: %d\n", pic_params->pic_fields.bits.cu_qp_delta_enabled_flag);
+    AV_LOG("weighted_pred_flag: %d\n", pic_params->pic_fields.bits.weighted_pred_flag);
+    AV_LOG("weighted_bipred_flag: %d\n", pic_params->pic_fields.bits.weighted_bipred_flag);
+    AV_LOG("transquant_bypass_enabled_flag: %d\n", pic_params->pic_fields.bits.transquant_bypass_enabled_flag);
+    AV_LOG("tiles_enabled_flag: %d\n", pic_params->pic_fields.bits.tiles_enabled_flag);
+    AV_LOG("entropy_coding_sync_enabled_flag: %d\n", pic_params->pic_fields.bits.entropy_coding_sync_enabled_flag);
+    AV_LOG("pps_loop_filter_across_slices_enabled_flag: %d\n", pic_params->pic_fields.bits.pps_loop_filter_across_slices_enabled_flag);
+    AV_LOG("loop_filter_across_tiles_enabled_flag: %d\n", pic_params->pic_fields.bits.loop_filter_across_tiles_enabled_flag);
+    AV_LOG("pcm_loop_filter_disabled_flag: %d\n", pic_params->pic_fields.bits.pcm_loop_filter_disabled_flag);
+    AV_LOG("NoPicReorderingFlag: %d\n", pic_params->pic_fields.bits.NoPicReorderingFlag);
+    AV_LOG("NoBiPredFlag: %d\n", pic_params->pic_fields.bits.NoBiPredFlag);
+    AV_LOG("ReservedBits: %d\n", pic_params->pic_fields.bits.ReservedBits);
+    // ----------------------------------------------------------------------------------
+    AV_LOG("sps_max_dec_pic_buffering_minus1: %d\n", pic_params->sps_max_dec_pic_buffering_minus1);
+    AV_LOG("bit_depth_luma_minus8: %d\n", pic_params->bit_depth_luma_minus8);
+    AV_LOG("bit_depth_chroma_minus8: %d\n", pic_params->bit_depth_chroma_minus8);
+    AV_LOG("pcm_sample_bit_depth_luma_minus1: %d\n", pic_params->pcm_sample_bit_depth_luma_minus1);
+    AV_LOG("pcm_sample_bit_depth_chroma_minus1: %d\n", pic_params->pcm_sample_bit_depth_chroma_minus1);
+    AV_LOG("log2_min_luma_coding_block_size_minus3: %d\n", pic_params->log2_min_luma_coding_block_size_minus3);
+    AV_LOG("log2_diff_max_min_luma_coding_block_size: %d\n", pic_params->log2_diff_max_min_luma_coding_block_size);
+    AV_LOG("log2_min_transform_block_size_minus2: %d\n", pic_params->log2_min_transform_block_size_minus2);
+    AV_LOG("log2_diff_max_min_transform_block_size: %d\n", pic_params->log2_diff_max_min_transform_block_size);
+    AV_LOG("log2_min_pcm_luma_coding_block_size_minus3: %d\n", pic_params->log2_min_pcm_luma_coding_block_size_minus3);
+    AV_LOG("log2_diff_max_min_pcm_luma_coding_block_size: %d\n", pic_params->log2_diff_max_min_pcm_luma_coding_block_size);
+    AV_LOG("max_transform_hierarchy_depth_intra: %d\n", pic_params->max_transform_hierarchy_depth_intra);
+    AV_LOG("max_transform_hierarchy_depth_inter: %d\n", pic_params->max_transform_hierarchy_depth_inter);
+    AV_LOG("init_qp_minus26: %d\n", pic_params->init_qp_minus26);
+    AV_LOG("diff_cu_qp_delta_depth: %d\n", pic_params->diff_cu_qp_delta_depth);
+    AV_LOG("pps_cb_qp_offset: %d\n", pic_params->pps_cb_qp_offset);
+    AV_LOG("pps_cr_qp_offset: %d\n", pic_params->pps_cr_qp_offset);
+    AV_LOG("log2_parallel_merge_level_minus2: %d\n", pic_params->log2_parallel_merge_level_minus2);
+    AV_LOG("num_tile_columns_minus1: %d\n", pic_params->num_tile_columns_minus1);
+    AV_LOG("num_tile_rows_minus1: %d\n", pic_params->num_tile_rows_minus1);
+    // ----------------------------------------------------------------------------------
+    AV_LOG("lists_modification_present_flag: %d\n", pic_params->slice_parsing_fields.bits.lists_modification_present_flag);
+    AV_LOG("long_term_ref_pics_present_flag: %d\n", pic_params->slice_parsing_fields.bits.long_term_ref_pics_present_flag);
+    AV_LOG("sps_temporal_mvp_enabled_flag: %d\n", pic_params->slice_parsing_fields.bits.sps_temporal_mvp_enabled_flag);
+    AV_LOG("cabac_init_present_flag: %d\n", pic_params->slice_parsing_fields.bits.cabac_init_present_flag);
+    AV_LOG("output_flag_present_flag: %d\n", pic_params->slice_parsing_fields.bits.output_flag_present_flag);
+    AV_LOG("dependent_slice_segments_enabled_flag: %d\n", pic_params->slice_parsing_fields.bits.dependent_slice_segments_enabled_flag);
+    AV_LOG("pps_slice_chroma_qp_offsets_present_flag: %d\n", pic_params->slice_parsing_fields.bits.pps_slice_chroma_qp_offsets_present_flag);
+    AV_LOG("sample_adaptive_offset_enabled_flag: %d\n", pic_params->slice_parsing_fields.bits.sample_adaptive_offset_enabled_flag);
+    AV_LOG("deblocking_filter_override_enabled_flag: %d\n", pic_params->slice_parsing_fields.bits.deblocking_filter_override_enabled_flag);
+    AV_LOG("pps_disable_deblocking_filter_flag: %d\n", pic_params->slice_parsing_fields.bits.pps_disable_deblocking_filter_flag);
+    AV_LOG("slice_segment_header_extension_present_flag: %d\n", pic_params->slice_parsing_fields.bits.slice_segment_header_extension_present_flag);
+    AV_LOG("RapPicFlag: %d\n", pic_params->slice_parsing_fields.bits.RapPicFlag);
+    AV_LOG("IdrPicFlag: %d\n", pic_params->slice_parsing_fields.bits.IdrPicFlag);
+    AV_LOG("IntraPicFlag: %d\n", pic_params->slice_parsing_fields.bits.IntraPicFlag);
+    AV_LOG("ReservedBits: %d\n", pic_params->slice_parsing_fields.bits.ReservedBits);
+    // ----------------------------------------------------------------------------------
+    AV_LOG("log2_max_pic_order_cnt_lsb_minus4: %d\n", pic_params->log2_max_pic_order_cnt_lsb_minus4);
+    AV_LOG("num_short_term_ref_pic_sets: %d\n", pic_params->num_short_term_ref_pic_sets);
+    AV_LOG("num_long_term_ref_pic_sps: %d\n", pic_params->num_long_term_ref_pic_sps);
+    AV_LOG("num_ref_idx_l0_default_active_minus1: %d\n", pic_params->num_ref_idx_l0_default_active_minus1);
+    AV_LOG("num_ref_idx_l1_default_active_minus1: %d\n", pic_params->num_ref_idx_l1_default_active_minus1);
+    AV_LOG("pps_beta_offset_div2: %d\n", pic_params->pps_beta_offset_div2);
+    AV_LOG("pps_tc_offset_div2: %d\n", pic_params->pps_tc_offset_div2);
+    AV_LOG("num_extra_slice_header_bits: %d\n", pic_params->num_extra_slice_header_bits);
+    AV_LOG("st_rps_bits: %d\n", pic_params->st_rps_bits);
+
+    // ----------------------------------------------------------------------------------
+    AV_LOG("column_width_minus1: ");
+    for(int i = 0; i<19; ++i)
+    {
+        AV_LOG("%d,", pic_params->column_width_minus1[i]);
+    }
+    AV_LOG("\n");
+    AV_LOG("row_height_minus1: ");
+    for(int i = 0; i<21; ++i)
+    {
+        AV_LOG("%d,", pic_params->row_height_minus1[i]);
+    }
+    AV_LOG("\n");
+
+    // ----------------------------------------------------------------------------------
+    AV_LOG("CurrPic: \n");
+    PrintVAPictureHEVC(&pic_params->CurrPic);
+    AV_LOG("ReferenceFrames: \n");
+    for(int i=0; i<15; ++i)
+    {
+        if(pic_params->ReferenceFrames[i].picture_id == VA_INVALID_ID) break;
+        AV_LOG("=====%d=====\n", i);
+        PrintVAPictureHEVC(&pic_params->ReferenceFrames[i]);
+    }
+}
+
+static void PrintVAIQMatrixBufferHEVC(VAIQMatrixBufferHEVC *matrix)
+{
+    AV_LOG("VAIQMatrixBufferHEVC:\n");
+    AV_LOG("ScalingList4x4:\n");
+    for(int i=0; i<16; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList4x4[0][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList4x4[1][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList4x4[2][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList4x4[3][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList4x4[4][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<16; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList4x4[5][i]);
+    }
+    AV_LOG("\n");
+
+    // --------------------------------------------------------
+    AV_LOG("ScalingList8x8:\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList8x8[0][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList8x8[1][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList8x8[2][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList8x8[3][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList8x8[4][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList8x8[5][i]);
+    }
+    AV_LOG("\n");
+
+    // --------------------------------------------------------
+    AV_LOG("ScalingList16x16:\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList16x16[0][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList16x16[1][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList16x16[2][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList16x16[3][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList16x16[4][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList16x16[5][i]);
+    }
+    AV_LOG("\n");
+
+    // --------------------------------------------------------
+    AV_LOG("ScalingList32x32:\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList32x32[0][i]);
+    }
+    AV_LOG("\n");
+    for(int i=0; i<64; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingList32x32[1][i]);
+    }
+    AV_LOG("\n");
+
+    // --------------------------------------------------------
+    AV_LOG("ScalingListDC16x16:");
+    for(int i=0; i<6; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingListDC16x16[i]);
+    }
+    AV_LOG("\n");
+    AV_LOG("ScalingListDC32x32:");
+    for(int i=0; i<2; ++i)
+    {
+        AV_LOG("%d,", matrix->ScalingListDC32x32[i]);
+    }
+    AV_LOG("\n");
+}
+
+static void PrintVASliceParameterBufferHEVC(const VASliceParameterBufferHEVC *slice_params)
+{
+    AV_LOG("==========VASliceParameterBufferH264-%d:\n", SLICE_PARAMS_COUNT++);
+    AV_LOG("slice_data_size: %d\n", slice_params->slice_data_size);
+    AV_LOG("slice_data_offset: %d\n", slice_params->slice_data_offset);
+    AV_LOG("slice_data_flag: %d\n", slice_params->slice_data_flag);
+    AV_LOG("slice_data_byte_offset: %d\n", slice_params->slice_data_byte_offset);
+    AV_LOG("slice_segment_address: %d\n", slice_params->slice_segment_address);
+    // --------------------------------------------------------
+    AV_LOG("LastSliceOfPic: %d\n", slice_params->LongSliceFlags.fields.LastSliceOfPic);
+    AV_LOG("dependent_slice_segment_flag: %d\n", slice_params->LongSliceFlags.fields.dependent_slice_segment_flag);
+    AV_LOG("slice_type: %d\n", slice_params->LongSliceFlags.fields.slice_type);
+    AV_LOG("color_plane_id: %d\n", slice_params->LongSliceFlags.fields.color_plane_id);
+    AV_LOG("slice_sao_luma_flag: %d\n", slice_params->LongSliceFlags.fields.slice_sao_luma_flag);
+    AV_LOG("slice_sao_chroma_flag: %d\n", slice_params->LongSliceFlags.fields.slice_sao_chroma_flag);
+    AV_LOG("mvd_l1_zero_flag: %d\n", slice_params->LongSliceFlags.fields.mvd_l1_zero_flag);
+    AV_LOG("cabac_init_flag: %d\n", slice_params->LongSliceFlags.fields.cabac_init_flag);
+    AV_LOG("slice_temporal_mvp_enabled_flag: %d\n", slice_params->LongSliceFlags.fields.slice_temporal_mvp_enabled_flag);
+    AV_LOG("slice_deblocking_filter_disabled_flag: %d\n", slice_params->LongSliceFlags.fields.slice_deblocking_filter_disabled_flag);
+    AV_LOG("collocated_from_l0_flag: %d\n", slice_params->LongSliceFlags.fields.collocated_from_l0_flag);
+    AV_LOG("slice_loop_filter_across_slices_enabled_flag: %d\n", slice_params->LongSliceFlags.fields.slice_loop_filter_across_slices_enabled_flag);
+    AV_LOG("reserved: %d\n", slice_params->LongSliceFlags.fields.reserved);
+    // --------------------------------------------------------
+    AV_LOG("collocated_ref_idx: %d\n", slice_params->collocated_ref_idx);
+    AV_LOG("num_ref_idx_l0_active_minus1: %d\n", slice_params->num_ref_idx_l0_active_minus1);
+    AV_LOG("num_ref_idx_l1_active_minus1: %d\n", slice_params->num_ref_idx_l1_active_minus1);
+    AV_LOG("slice_qp_delta: %d\n", slice_params->slice_qp_delta);
+    AV_LOG("slice_cb_qp_offset: %d\n", slice_params->slice_cb_qp_offset);
+    AV_LOG("slice_cr_qp_offset: %d\n", slice_params->slice_cr_qp_offset);
+    AV_LOG("slice_beta_offset_div2: %d\n", slice_params->slice_beta_offset_div2);
+    AV_LOG("slice_tc_offset_div2: %d\n", slice_params->slice_tc_offset_div2);
+    AV_LOG("luma_log2_weight_denom: %d\n", slice_params->luma_log2_weight_denom);
+    AV_LOG("delta_chroma_log2_weight_denom: %d\n", slice_params->delta_chroma_log2_weight_denom);
+    // --------------------------------------------------------
+    AV_LOG("five_minus_max_num_merge_cand: %d\n", slice_params->five_minus_max_num_merge_cand);
+    AV_LOG("num_entry_point_offsets: %d\n", slice_params->num_entry_point_offsets);
+    AV_LOG("entry_offset_to_subset_array: %d\n", slice_params->entry_offset_to_subset_array);
+    AV_LOG("slice_data_num_emu_prevn_bytes: %d\n", slice_params->slice_data_num_emu_prevn_bytes);
+
+    // --------------------------------------------------------
+    AV_LOG("RefPicList0: ");
+    for(int i = 0; i < 15; ++i)
+    {
+        AV_LOG("%d,", slice_params->RefPicList[0][i]);
+    }
+    AV_LOG("\n");
+    AV_LOG("RefPicList1: ");
+    for(int i = 0; i < 15; ++i)
+    {
+        AV_LOG("%d,", slice_params->RefPicList[1][i]);
+    }
+    AV_LOG("\n");
+
+    // --------------------------------------------------------
+    AV_LOG("delta_luma_weight_l0: ");
+    for(int i = 0; i < 15; ++i)
+    {
+        AV_LOG("%d,", slice_params->delta_luma_weight_l0[i]);
+    }
+    AV_LOG("\n");
+    AV_LOG("luma_offset_l0: ");
+    for(int i = 0; i < 15; ++i)
+    {
+        AV_LOG("%d,", slice_params->luma_offset_l0[i]);
+    }
+    AV_LOG("\n");
+
+    AV_LOG("delta_chroma_weight_l0: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->delta_chroma_weight_l0[i][0]);
+    }
+    AV_LOG("\n");
+    AV_LOG("delta_chroma_weight_l0: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->delta_chroma_weight_l0[i][1]);
+    }
+    AV_LOG("\n");
+
+    AV_LOG("ChromaOffsetL0: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->ChromaOffsetL0[i][0]);
+    }
+    AV_LOG("\n");
+    AV_LOG("ChromaOffsetL0: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->ChromaOffsetL0[i][1]);
+    }
+    AV_LOG("\n");
+
+    AV_LOG("delta_luma_weight_l1: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->delta_luma_weight_l1[i]);
+    }
+    AV_LOG("\n");
+    AV_LOG("luma_offset_l1: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->luma_offset_l1[i]);
+    }
+    AV_LOG("\n");
+
+    AV_LOG("delta_chroma_weight_l1: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->delta_chroma_weight_l1[i][0]);
+    }
+    AV_LOG("\n");
+    AV_LOG("delta_chroma_weight_l1: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->delta_chroma_weight_l1[i][1]);
+    }
+    AV_LOG("\n");
+
+    AV_LOG("ChromaOffsetL1: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->ChromaOffsetL1[i][0]);
+    }
+    AV_LOG("\n");
+    AV_LOG("ChromaOffsetL1: ");
+    for(int i=0; i<15; ++i)
+    {
+        AV_LOG("%d,", slice_params->ChromaOffsetL1[i][1]);
+    }
+    AV_LOG("\n");
+}
 
 typedef struct VAAPIDecodePictureHEVC {
 #if VA_CHECK_VERSION(1, 2, 0)
@@ -260,8 +636,8 @@ static int vaapi_hevc_start_frame(AVCodecContext          *avctx,
     else if (sps->scaling_list_enable_flag)
         scaling_list = &sps->scaling_list;
 
+    VAIQMatrixBufferHEVC iq_matrix;
     if (scaling_list) {
-        VAIQMatrixBufferHEVC iq_matrix;
         int j;
 
         for (i = 0; i < 6; i++) {
@@ -281,9 +657,16 @@ static int vaapi_hevc_start_frame(AVCodecContext          *avctx,
         err = ff_vaapi_decode_make_param_buffer(avctx, &pic->pic,
                                                 VAIQMatrixBufferType,
                                                 &iq_matrix, sizeof(iq_matrix));
+
+
         if (err < 0)
             goto fail;
     }
+
+#if PRINT_MESSAGE
+    PrintVAPictureParameterBufferHEVC(pic_param);
+    if(scaling_list) PrintVAIQMatrixBufferHEVC(&iq_matrix);
+#endif
 
     return 0;
 
@@ -508,6 +891,10 @@ static int vaapi_hevc_decode_slice(AVCodecContext *avctx,
 
     pic->last_buffer = buffer;
     pic->last_size   = size;
+    
+#if PRINT_MESSAGE
+    PrintVASliceParameterBufferHEVC(last_slice_param);
+#endif
 
     return 0;
 }

@@ -36,6 +36,8 @@
 
 #include <assert.h>
 
+#define PRINT_MESSAGE 0
+
 static void pic_as_field(H264Ref *pic, const int parity)
 {
     int i;
@@ -299,8 +301,10 @@ int ff_h264_build_ref_list(H264Context *h, H264SliceContext *sl)
 {
     int list, index, pic_structure;
 
+#if PRINT_MESSAGE
     print_short_term(h);
     print_long_term(h);
+#endif
 
     h264_initialise_ref_list(h, sl);
 
@@ -802,8 +806,10 @@ int ff_h264_execute_ref_pic_marking(H264Context *h)
         }
     }
 
+#if PRINT_MESSAGE
     print_short_term(h);
     print_long_term(h);
+#endif
 
     for (i = 0; i < FF_ARRAY_ELEMS(h->ps.pps_list); i++) {
         if (h->ps.pps_list[i]) {
@@ -847,12 +853,6 @@ int ff_h264_decode_ref_pic_marking(H264SliceContext *sl, GetBitContext *gb,
         sl->explicit_ref_marking = 1;
     } else {
         sl->explicit_ref_marking = get_bits1(gb);
-        // test
-        /* av_log(NULL, AV_LOG_ERROR, "==========================adaptive flag = %d\n", sl->explicit_ref_marking); */
-        if(sl->explicit_ref_marking)
-        {
-            /* av_log(NULL, AV_LOG_ERROR, "==========================adaptive flag = 1\n"); */
-        }
         if (sl->explicit_ref_marking) {
             for (i = 0; i < FF_ARRAY_ELEMS(sl->mmco); i++) {
                 MMCOOpcode opcode = get_ue_golomb_31(gb);

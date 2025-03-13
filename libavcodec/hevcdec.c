@@ -54,6 +54,8 @@
 #include "thread.h"
 #include "threadframe.h"
 
+#define PRINT_DPB 0
+
 static const uint8_t hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 /**
@@ -2996,6 +2998,19 @@ static int set_side_data(HEVCContext *s)
     return 0;
 }
 
+static void dpb_print(HEVCContext *s)
+{
+    for (int i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {
+        HEVCFrame *frame = &s->DPB[i];
+        av_log(NULL, AV_LOG_ERROR, "poc: %d, short ref: %d, long ref: %d, output: %d\n",
+                frame->poc,
+                frame->flags & HEVC_FRAME_FLAG_SHORT_REF,
+                frame->flags & HEVC_FRAME_FLAG_LONG_REF,
+                frame->flags & HEVC_FRAME_FLAG_OUTPUT
+                );
+    }
+}
+
 static int hevc_frame_start(HEVCContext *s)
 {
     HEVCLocalContext *lc = s->HEVClc;
@@ -3021,11 +3036,26 @@ static int hevc_frame_start(HEVCContext *s)
     if (ret < 0)
         goto fail;
 
+#if PRINT_DPB
+    // print nal unit type
+    av_log(NULL, AV_LOG_ERROR, "Nal type: %d\n", s->nal_unit_type);
+
+    // print dpb mark before
+    av_log(NULL, AV_LOG_ERROR, "DPB mark before:\n");
+    dpb_print(s);
+#endif
+
     ret = ff_hevc_frame_rps(s);
     if (ret < 0) {
         av_log(s->avctx, AV_LOG_ERROR, "Error constructing the frame RPS.\n");
         goto fail;
     }
+
+#if PRINT_DPB
+    // print dpb mark after
+    av_log(NULL, AV_LOG_ERROR, "DPB mark after:\n");
+    dpb_print(s);
+#endif
 
     s->ref->frame->key_frame = IS_IRAP(s);
 
@@ -3047,6 +3077,12 @@ static int hevc_frame_start(HEVCContext *s)
 
     s->frame->pict_type = 3 - s->sh.slice_type;
 
+#if PRINT_DPB
+    // print dpb init before
+    av_log(NULL, AV_LOG_ERROR, "DPB init before:\n");
+    dpb_print(s);
+#endif
+
     if (!IS_IRAP(s))
         ff_hevc_bump_frame(s);
 
@@ -3054,6 +3090,12 @@ static int hevc_frame_start(HEVCContext *s)
     ret = ff_hevc_output_frame(s, s->output_frame, 0);
     if (ret < 0)
         goto fail;
+
+#if PRINT_DPB
+    // print dpb init after
+    av_log(NULL, AV_LOG_ERROR, "DPB init after:\n");
+    dpb_print(s);
+#endif
 
     if (!s->avctx->hwaccel)
         ff_thread_finish_setup(s->avctx);
