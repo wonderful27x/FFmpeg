@@ -2,6 +2,7 @@
 
  cd ..
  ./configure \
+     --prefix=/usr \
      --enable-gpl \
      --enable-nonfree \
      --extra-cflags=-g \

@@ -31,9 +31,319 @@
 #include "encode.h"
 #include "avcodec.h"
 
-#define PRINT_MESSAGE 1
+// ===================================log begin==============================================================
 #include <inttypes.h>
 #include <libavutil/time.h>
+
+#define PREDICTION_RETURN_NO_ERROR 1
+#define PRINT_TIME_COST 0
+#define ENABLE_LOG_MISC               0
+#define ENABLE_LOG_SPS_PPS_SLICE      0
+
+static int ENC_SEQ_PARAMS_COUNT = 0;
+static void PrintVAEncSequenceParameterBufferH264(const VAEncSequenceParameterBufferH264 *seq)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncSequenceParameterBufferH264-%d:\n", ENC_SEQ_PARAMS_COUNT++);
+
+    av_log(NULL, AV_LOG_ERROR, "seq_parameter_set_id: %d\n", seq->seq_parameter_set_id);
+    av_log(NULL, AV_LOG_ERROR, "level_idc: %d\n", seq->level_idc);
+    av_log(NULL, AV_LOG_ERROR, "intra_period: %d\n", seq->intra_period);
+    av_log(NULL, AV_LOG_ERROR, "intra_idr_period: %d\n", seq->intra_idr_period);
+    av_log(NULL, AV_LOG_ERROR, "ip_period: %d\n", seq->ip_period);
+    av_log(NULL, AV_LOG_ERROR, "bits_per_second: %d\n", seq->bits_per_second);
+    av_log(NULL, AV_LOG_ERROR, "max_num_ref_frames: %d\n", seq->max_num_ref_frames);
+    av_log(NULL, AV_LOG_ERROR, "picture_width_in_mbs: %d\n", seq->picture_width_in_mbs);
+    av_log(NULL, AV_LOG_ERROR, "picture_height_in_mbs: %d\n", seq->picture_height_in_mbs);
+    av_log(NULL, AV_LOG_ERROR, "bit_depth_luma_minus8: %d\n", seq->bit_depth_luma_minus8);
+    av_log(NULL, AV_LOG_ERROR, "bit_depth_chroma_minus8: %d\n", seq->bit_depth_chroma_minus8);
+    av_log(NULL, AV_LOG_ERROR, "num_ref_frames_in_pic_order_cnt_cycle: %d\n", seq->num_ref_frames_in_pic_order_cnt_cycle);
+    av_log(NULL, AV_LOG_ERROR, "offset_for_non_ref_pic: %d\n", seq->offset_for_non_ref_pic);
+    av_log(NULL, AV_LOG_ERROR, "offset_for_top_to_bottom_field: %d\n", seq->offset_for_top_to_bottom_field);
+    av_log(NULL, AV_LOG_ERROR, "offset_for_ref_frame: %d %d %d %d %d %d\n",
+            seq->offset_for_ref_frame[0],
+            seq->offset_for_ref_frame[1],
+            seq->offset_for_ref_frame[2],
+            seq->offset_for_ref_frame[3],
+            seq->offset_for_ref_frame[4],
+            seq->offset_for_ref_frame[5]);
+    av_log(NULL, AV_LOG_ERROR, "frame_cropping_flag: %d\n", seq->frame_cropping_flag);
+    av_log(NULL, AV_LOG_ERROR, "frame_crop_left_offset: %d\n", seq->frame_crop_left_offset);
+    av_log(NULL, AV_LOG_ERROR, "frame_crop_right_offset: %d\n", seq->frame_crop_right_offset);
+    av_log(NULL, AV_LOG_ERROR, "frame_crop_top_offset: %d\n", seq->frame_crop_top_offset);
+    av_log(NULL, AV_LOG_ERROR, "frame_crop_bottom_offset: %d\n", seq->frame_crop_bottom_offset);
+    av_log(NULL, AV_LOG_ERROR, "aspect_ratio_idc: %d\n", seq->aspect_ratio_idc);
+    av_log(NULL, AV_LOG_ERROR, "sar_width: %d\n", seq->sar_width);
+    av_log(NULL, AV_LOG_ERROR, "sar_height: %d\n", seq->sar_height);
+    av_log(NULL, AV_LOG_ERROR, "num_units_in_tick: %d\n", seq->num_units_in_tick);
+    av_log(NULL, AV_LOG_ERROR, "time_scale: %d\n", seq->time_scale);
+
+    av_log(NULL, AV_LOG_ERROR, "vui_parameters_present_flag: %d\n", seq->vui_parameters_present_flag);
+    /* union { */
+    /*     struct { */
+            av_log(NULL, AV_LOG_ERROR, "vui_fields.value: %d\n", seq->vui_fields.value);
+            av_log(NULL, AV_LOG_ERROR, "aspect_ratio_info_present_flag: %d\n", seq->vui_fields.bits.aspect_ratio_info_present_flag);
+            av_log(NULL, AV_LOG_ERROR, "timing_info_present_flag: %d\n", seq->vui_fields.bits.timing_info_present_flag);
+            av_log(NULL, AV_LOG_ERROR, "bitstream_restriction_flag: %d\n", seq->vui_fields.bits.bitstream_restriction_flag);
+            av_log(NULL, AV_LOG_ERROR, "log2_max_mv_length_horizontal: %d\n", seq->vui_fields.bits.log2_max_mv_length_horizontal);
+            av_log(NULL, AV_LOG_ERROR, "log2_max_mv_length_vertical: %d\n", seq->vui_fields.bits.log2_max_mv_length_vertical);
+            av_log(NULL, AV_LOG_ERROR, "fixed_frame_rate_flag: %d\n", seq->vui_fields.bits.fixed_frame_rate_flag);
+            av_log(NULL, AV_LOG_ERROR, "low_delay_hrd_flag: %d\n", seq->vui_fields.bits.low_delay_hrd_flag);
+            av_log(NULL, AV_LOG_ERROR, "motion_vectors_over_pic_boundaries_flag: %d\n", seq->vui_fields.bits.motion_vectors_over_pic_boundaries_flag);
+        /* } bits; */
+        /* uint32_t value; */
+    /* } vui_fields; */
+
+    /* union { */
+    /*     struct { */
+            av_log(NULL, AV_LOG_ERROR, "seq_fields.value: %d\n", seq->seq_fields.value);
+            av_log(NULL, AV_LOG_ERROR, "chroma_format_idc: %d\n", seq->seq_fields.bits.chroma_format_idc);
+            av_log(NULL, AV_LOG_ERROR, "frame_mbs_only_flag: %d\n", seq->seq_fields.bits.frame_mbs_only_flag);
+            av_log(NULL, AV_LOG_ERROR, "mb_adaptive_frame_field_flag: %d\n", seq->seq_fields.bits.mb_adaptive_frame_field_flag);
+            av_log(NULL, AV_LOG_ERROR, "seq_scaling_matrix_present_flag: %d\n", seq->seq_fields.bits.seq_scaling_matrix_present_flag);
+            av_log(NULL, AV_LOG_ERROR, "direct_8x8_inference_flag: %d\n", seq->seq_fields.bits.direct_8x8_inference_flag);
+            av_log(NULL, AV_LOG_ERROR, "log2_max_frame_num_minus4: %d\n", seq->seq_fields.bits.log2_max_frame_num_minus4);
+            av_log(NULL, AV_LOG_ERROR, "pic_order_cnt_type: %d\n", seq->seq_fields.bits.pic_order_cnt_type);
+            av_log(NULL, AV_LOG_ERROR, "log2_max_pic_order_cnt_lsb_minus4: %d\n", seq->seq_fields.bits.log2_max_pic_order_cnt_lsb_minus4);
+            av_log(NULL, AV_LOG_ERROR, "delta_pic_order_always_zero_flag: %d\n", seq->seq_fields.bits.delta_pic_order_always_zero_flag);
+        /* } bits; */
+        /* uint32_t value; */
+    /* } seq_fields; */
+}
+
+static void PrintVAPictureH264(const VAPictureH264 *vapic)
+{
+    av_log(NULL, AV_LOG_ERROR, "picture_id: %d\n", vapic->picture_id);
+    av_log(NULL, AV_LOG_ERROR, "frame_idx: %d\n", vapic->frame_idx);
+    av_log(NULL, AV_LOG_ERROR, "flags: %d\n", vapic->flags);
+    av_log(NULL, AV_LOG_ERROR, "TopFieldOrderCnt: %d\n", vapic->TopFieldOrderCnt);
+    av_log(NULL, AV_LOG_ERROR, "BottomFieldOrderCnt: %d\n", vapic->BottomFieldOrderCnt);
+}
+
+static int ENC_PIC_PARAMS_COUNT = 0;
+static void PrintVAEncPictureParameterBufferH264(const VAEncPictureParameterBufferH264 *pic)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncPictureParameterBufferH264-%d:\n", ENC_PIC_PARAMS_COUNT++);
+
+    av_log(NULL, AV_LOG_ERROR, "coded_buf: %d\n", pic->coded_buf);
+    av_log(NULL, AV_LOG_ERROR, "pic_parameter_set_id: %d\n", pic->pic_parameter_set_id);
+    av_log(NULL, AV_LOG_ERROR, "seq_parameter_set_id: %d\n", pic->seq_parameter_set_id);
+    av_log(NULL, AV_LOG_ERROR, "last_picture: %d\n", pic->last_picture);
+    av_log(NULL, AV_LOG_ERROR, "frame_num: %d\n", pic->frame_num);
+    av_log(NULL, AV_LOG_ERROR, "pic_init_qp: %d\n", pic->pic_init_qp);
+    av_log(NULL, AV_LOG_ERROR, "num_ref_idx_l0_active_minus1: %d\n", pic->num_ref_idx_l0_active_minus1);
+    av_log(NULL, AV_LOG_ERROR, "num_ref_idx_l1_active_minus1: %d\n", pic->num_ref_idx_l1_active_minus1);
+    av_log(NULL, AV_LOG_ERROR, "chroma_qp_index_offset: %d\n", pic->chroma_qp_index_offset);
+    av_log(NULL, AV_LOG_ERROR, "second_chroma_qp_index_offset: %d\n", pic->second_chroma_qp_index_offset);
+
+    /* union { */
+    /*     struct { */
+            av_log(NULL, AV_LOG_ERROR, "pic_fields.value: %d\n", pic->pic_fields.value);
+            av_log(NULL, AV_LOG_ERROR, "idr_pic_flag: %d\n", pic->pic_fields.bits.idr_pic_flag);
+            av_log(NULL, AV_LOG_ERROR, "reference_pic_flag: %d\n", pic->pic_fields.bits.reference_pic_flag);
+            av_log(NULL, AV_LOG_ERROR, "entropy_coding_mode_flag: %d\n", pic->pic_fields.bits.entropy_coding_mode_flag);
+            av_log(NULL, AV_LOG_ERROR, "weighted_pred_flag: %d\n", pic->pic_fields.bits.weighted_pred_flag);
+            av_log(NULL, AV_LOG_ERROR, "weighted_bipred_idc: %d\n", pic->pic_fields.bits.weighted_bipred_idc);
+            av_log(NULL, AV_LOG_ERROR, "constrained_intra_pred_flag: %d\n", pic->pic_fields.bits.constrained_intra_pred_flag);
+            av_log(NULL, AV_LOG_ERROR, "transform_8x8_mode_flag: %d\n", pic->pic_fields.bits.transform_8x8_mode_flag);
+            av_log(NULL, AV_LOG_ERROR, "deblocking_filter_control_present_flag: %d\n", pic->pic_fields.bits.deblocking_filter_control_present_flag);
+            av_log(NULL, AV_LOG_ERROR, "redundant_pic_cnt_present_flag: %d\n", pic->pic_fields.bits.redundant_pic_cnt_present_flag);
+            av_log(NULL, AV_LOG_ERROR, "pic_order_present_flag: %d\n", pic->pic_fields.bits.pic_order_present_flag);
+            av_log(NULL, AV_LOG_ERROR, "pic_scaling_matrix_present_flag: %d\n", pic->pic_fields.bits.pic_scaling_matrix_present_flag);
+        /* } bits; */
+        /* uint32_t value; */
+    /* } pic_fields; */
+
+    av_log(NULL, AV_LOG_ERROR, "CurrPic: \n");
+    PrintVAPictureH264(&pic->CurrPic);
+    av_log(NULL, AV_LOG_ERROR, "ReferenceFrames: \n");
+    for(int i=0; i<16; ++i)
+    {
+        if(pic->ReferenceFrames[i].picture_id == VA_INVALID_ID) break;
+        av_log(NULL, AV_LOG_ERROR, "=====%d=====\n", i);
+        PrintVAPictureH264(&pic->ReferenceFrames[i]);
+    }
+}
+
+static int ENC_SLICE_PARAMS_COUNT = 0;
+static void PrintVAEncSliceParameterBufferH264(const VAEncSliceParameterBufferH264 *slice)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncSliceParameterBufferH264-%d:\n", ENC_SLICE_PARAMS_COUNT++);
+
+    av_log(NULL, AV_LOG_ERROR, "macroblock_address: %d\n", slice->macroblock_address);
+    av_log(NULL, AV_LOG_ERROR, "num_macroblocks: %d\n", slice->num_macroblocks);
+    av_log(NULL, AV_LOG_ERROR, "macroblock_info: %d\n", slice->macroblock_info);
+    av_log(NULL, AV_LOG_ERROR, "slice_type: %d\n", slice->slice_type);
+    av_log(NULL, AV_LOG_ERROR, "pic_parameter_set_id: %d\n", slice->pic_parameter_set_id);
+    av_log(NULL, AV_LOG_ERROR, "idr_pic_id: %d\n", slice->idr_pic_id);
+    av_log(NULL, AV_LOG_ERROR, "pic_order_cnt_lsb: %d\n", slice->pic_order_cnt_lsb);
+    av_log(NULL, AV_LOG_ERROR, "delta_pic_order_cnt_bottom: %d\n", slice->delta_pic_order_cnt_bottom);
+    av_log(NULL, AV_LOG_ERROR, "delta_pic_order_cnt: %d %d\n", slice->delta_pic_order_cnt[0], slice->delta_pic_order_cnt[1]);
+    av_log(NULL, AV_LOG_ERROR, "direct_spatial_mv_pred_flag: %d\n", slice->direct_spatial_mv_pred_flag);
+    av_log(NULL, AV_LOG_ERROR, "num_ref_idx_active_override_flag: %d\n", slice->num_ref_idx_active_override_flag);
+    av_log(NULL, AV_LOG_ERROR, "num_ref_idx_l0_active_minus1: %d\n", slice->num_ref_idx_l0_active_minus1);
+    av_log(NULL, AV_LOG_ERROR, "num_ref_idx_l1_active_minus1: %d\n", slice->num_ref_idx_l1_active_minus1);
+
+    av_log(NULL, AV_LOG_ERROR, "cabac_init_idc: %d\n", slice->cabac_init_idc);
+    av_log(NULL, AV_LOG_ERROR, "slice_qp_delta: %d\n", slice->slice_qp_delta);
+    av_log(NULL, AV_LOG_ERROR, "disable_deblocking_filter_idc: %d\n", slice->disable_deblocking_filter_idc);
+    av_log(NULL, AV_LOG_ERROR, "slice_alpha_c0_offset_div2: %d\n", slice->slice_alpha_c0_offset_div2);
+    av_log(NULL, AV_LOG_ERROR, "slice_beta_offset_div2: %d\n", slice->slice_beta_offset_div2);
+
+    av_log(NULL, AV_LOG_ERROR, "luma_log2_weight_denom: %d\n", slice->luma_log2_weight_denom);
+    av_log(NULL, AV_LOG_ERROR, "chroma_log2_weight_denom: %d\n", slice->chroma_log2_weight_denom);
+    av_log(NULL, AV_LOG_ERROR, "luma_weight_l0_flag: %d\n", slice->luma_weight_l0_flag);
+    av_log(NULL, AV_LOG_ERROR, "chroma_weight_l0_flag: %d\n", slice->chroma_weight_l0_flag);
+    av_log(NULL, AV_LOG_ERROR, "luma_weight_l1_flag: %d\n", slice->luma_weight_l1_flag);
+    av_log(NULL, AV_LOG_ERROR, "chroma_weight_l1_flag: %d\n", slice->chroma_weight_l1_flag);
+
+    av_log(NULL, AV_LOG_ERROR, "luma_weight_l0  : ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->luma_weight_l0[i]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "luma_offset_l0  : ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->luma_offset_l0[i]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+
+    av_log(NULL, AV_LOG_ERROR, "chroma_weight_l0: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_weight_l0[i][0]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "chroma_weight_l0: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_weight_l0[i][1]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "chroma_offset_l0: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_offset_l0[i][0]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "chroma_offset_l0: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_offset_l0[i][1]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    // ---------------------------------------------------
+    av_log(NULL, AV_LOG_ERROR, "luma_weight_l1  : ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->luma_weight_l1[i]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "luma_offset_l1  : ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->luma_offset_l1[i]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+
+    av_log(NULL, AV_LOG_ERROR, "chroma_weight_l1: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_weight_l1[i][0]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "chroma_weight_l1: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_weight_l1[i][1]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "chroma_offset_l1: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_offset_l1[i][0]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+    av_log(NULL, AV_LOG_ERROR, "chroma_offset_l1: ");
+    for(int i=0; i<32; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "%d,", slice->chroma_offset_l1[i][1]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "\n");
+
+
+    int sizel0 = slice->num_ref_idx_l0_active_minus1 + 1;
+    int sizel1 = slice->num_ref_idx_l1_active_minus1 + 1;
+    av_log(NULL, AV_LOG_ERROR, "RefPicList0:\n");
+    for(int i=0; i<sizel0; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "=====%d=====\n", i);
+        PrintVAPictureH264(&slice->RefPicList0[i]);
+    }
+    av_log(NULL, AV_LOG_ERROR, "RefPicList1:\n");
+    for(int i=0; i<sizel1; ++i)
+    {
+        av_log(NULL, AV_LOG_ERROR, "=====%d=====\n", i);
+        PrintVAPictureH264(&slice->RefPicList1[i]);
+    }
+}
+
+static int MISC_HRD_COUNT = 0;
+static void PrintVAEncMiscParameterHRD(VAEncMiscParameterHRD *misc)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncMiscParameterHRD-%d\n", MISC_HRD_COUNT++);
+    av_log(NULL, AV_LOG_ERROR, "initial_buffer_fullness: %d\n", misc->initial_buffer_fullness);
+    av_log(NULL, AV_LOG_ERROR, "buffer_size: %d\n", misc->buffer_size);
+}
+
+static int MISC_RATE_CTR_COUNT = 0;
+static void PrintVAEncMiscParameterRateControl(VAEncMiscParameterRateControl *misc)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncMiscParameterRateControl-%d\n", MISC_RATE_CTR_COUNT++);
+    av_log(NULL, AV_LOG_ERROR, "bits_per_second: %d\n", misc->bits_per_second);
+    av_log(NULL, AV_LOG_ERROR, "target_percentage: %d\n", misc->target_percentage);
+    av_log(NULL, AV_LOG_ERROR, "window_size: %d\n", misc->window_size);
+    av_log(NULL, AV_LOG_ERROR, "initial_qp: %d\n", misc->initial_qp);
+    av_log(NULL, AV_LOG_ERROR, "min_qp: %d\n", misc->min_qp);
+    av_log(NULL, AV_LOG_ERROR, "basic_unit_size: %d\n", misc->basic_unit_size);
+    av_log(NULL, AV_LOG_ERROR, "ICQ_quality_factor: %d\n", misc->ICQ_quality_factor);
+    av_log(NULL, AV_LOG_ERROR, "max_qp: %d\n", misc->max_qp);
+    av_log(NULL, AV_LOG_ERROR, "quality_factor: %d\n", misc->quality_factor);
+    av_log(NULL, AV_LOG_ERROR, "target_frame_size: %d\n", misc->target_frame_size);
+
+    /* union { */
+    /*     struct { */
+            av_log(NULL, AV_LOG_ERROR, "rc_flags.value: %d\n", misc->rc_flags.value);
+            av_log(NULL, AV_LOG_ERROR, "reset: %d\n", misc->rc_flags.bits.reset);
+            av_log(NULL, AV_LOG_ERROR, "disable_frame_skip: %d\n", misc->rc_flags.bits.disable_frame_skip);
+            av_log(NULL, AV_LOG_ERROR, "disable_bit_stuffing: %d\n", misc->rc_flags.bits.disable_bit_stuffing);
+            av_log(NULL, AV_LOG_ERROR, "mb_rate_control: %d\n", misc->rc_flags.bits.mb_rate_control);
+            av_log(NULL, AV_LOG_ERROR, "temporal_id: %d\n", misc->rc_flags.bits.temporal_id);
+            av_log(NULL, AV_LOG_ERROR, "cfs_I_frames: %d\n", misc->rc_flags.bits.cfs_I_frames);
+            av_log(NULL, AV_LOG_ERROR, "enable_parallel_brc: %d\n", misc->rc_flags.bits.enable_parallel_brc);
+            av_log(NULL, AV_LOG_ERROR, "enable_dynamic_scaling: %d\n", misc->rc_flags.bits.enable_dynamic_scaling);
+            av_log(NULL, AV_LOG_ERROR, "frame_tolerance_mode: %d\n", misc->rc_flags.bits.frame_tolerance_mode);
+        /* } bits; */
+        /* uint32_t value; */
+    /* } rc_flags; */
+}
+
+static int MISC_FRAME_RATE_COUNT = 0;
+static void PrintVAEncMiscParameterFrameRate(VAEncMiscParameterFrameRate *misc)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncMiscParameterFrameRate-%d\n", MISC_FRAME_RATE_COUNT++);
+    av_log(NULL, AV_LOG_ERROR, "framerate: %d\n", misc->framerate);
+    av_log(NULL, AV_LOG_ERROR, "temporal_id: %d\n", misc->framerate_flags.bits.temporal_id);
+}
+
+static int MISC_QUALITY_LEVLEL_COUNT = 0;
+static void PrintVAEncMiscParameterBufferQualityLevel(VAEncMiscParameterBufferQualityLevel *misc)
+{
+    av_log(NULL, AV_LOG_ERROR, "==========VAEncMiscParameterBufferQualityLevel-%d\n", MISC_QUALITY_LEVLEL_COUNT++);
+    av_log(NULL, AV_LOG_ERROR, "quality_level: %d\n", misc->quality_level);
+}
+// ===================================log end==============================================================
 
 const AVCodecHWConfigInternal *const ff_vaapi_encode_hw_configs[] = {
     HW_CONFIG_ENCODER_FRAMES(VAAPI, VAAPI),
@@ -668,7 +978,7 @@ static int vaapi_encode_output(AVCodecContext *avctx,
     if (err < 0)
         return err;
 
-#if PRINT_MESSAGE
+#if PRINT_TIME_COST
     int64_t start_time, end_time;
     start_time = av_gettime();
 #endif
@@ -683,7 +993,7 @@ static int vaapi_encode_output(AVCodecContext *avctx,
         goto fail;
     }
 
-#if PRINT_MESSAGE
+#if PRINT_TIME_COST
     end_time = av_gettime();
     int64_t elapsed_time = end_time - start_time;
     double elapsed_time_ms = elapsed_time / 1000.0;
@@ -2006,7 +2316,9 @@ static av_cold int vaapi_encode_init_gop_structure(AVCodecContext *avctx)
                 ((ref_l1 == 0) && (attr.value & (VA_PREDICTION_DIRECTION_FUTURE | VA_PREDICTION_DIRECTION_BI_NOT_EMPTY)))) {
                 av_log(avctx, AV_LOG_ERROR, "Driver report incorrect prediction "
                        "direction attribute.\n");
+#if !PREDICTION_RETURN_NO_ERROR
                 return AVERROR_EXTERNAL;
+#endif
             }
 
             if (!(attr.value & VA_PREDICTION_DIRECTION_FUTURE)) {
