@@ -25,6 +25,52 @@
 #include "rational.h"
 
 /**
+ * HDR Vivid three spline params.
+ */
+typedef struct AVHDRVivid3SplineParams {
+    /**
+     * The mode of three Spline. the value shall be in the range
+     * of 0 to 3, inclusive.
+     */
+    int th_mode;
+
+    /**
+     * three_Spline_TH_enable_MB is in the range of 0.0 to 1.0, inclusive
+     * and in multiples of 1.0/255.
+     *
+     */
+    AVRational th_enable_mb;
+
+    /**
+     * 3Spline_TH_enable of three Spline.
+     * The value shall be in the range of 0.0 to 1.0, inclusive.
+     * and in multiples of 1.0/4095.
+     */
+    AVRational th_enable;
+
+    /**
+     * 3Spline_TH_Delta1 of three Spline.
+     * The value shall be in the range of 0.0 to 0.25, inclusive,
+     * and in multiples of 0.25/1023.
+     */
+    AVRational th_delta1;
+
+    /**
+     * 3Spline_TH_Delta2 of three Spline.
+     * The value shall be in the range of 0.0 to 0.25, inclusive,
+     * and in multiples of 0.25/1023.
+     */
+    AVRational th_delta2;
+
+    /**
+     * 3Spline_enable_Strength of three Spline.
+     * The value shall be in the range of 0.0 to 1.0, inclusive,
+     * and in multiples of 1.0/255.
+     */
+    AVRational enable_strength;
+} AVHDRVivid3SplineParams;
+
+/**
  * Color tone mapping parameters at a processing window in a dynamic metadata for
  * CUVA 005.1:2021.
  */
@@ -122,46 +168,7 @@ typedef struct AVHDRVividColorToneMappingParams {
      */
     int three_Spline_num;
 
-    /**
-     * The mode of three Spline. the value shall be in the range
-     * of 0 to 3, inclusive.
-     */
-    int three_Spline_TH_mode;
-
-    /**
-     * three_Spline_TH_enable_MB is in the range of 0.0 to 1.0, inclusive
-     * and in multiples of 1.0/255.
-     *
-     */
-    AVRational three_Spline_TH_enable_MB;
-
-    /**
-     * 3Spline_TH_enable of three Spline.
-     * The value shall be in the range of 0.0 to 1.0, inclusive.
-     * and in multiples of 1.0/4095.
-     */
-    AVRational three_Spline_TH_enable;
-
-    /**
-     * 3Spline_TH_Delta1 of three Spline.
-     * The value shall be in the range of 0.0 to 0.25, inclusive,
-     * and in multiples of 0.25/1023.
-     */
-    AVRational three_Spline_TH_Delta1;
-
-    /**
-     * 3Spline_TH_Delta2 of three Spline.
-     * The value shall be in the range of 0.0 to 0.25, inclusive,
-     * and in multiples of 0.25/1023.
-     */
-    AVRational three_Spline_TH_Delta2;
-
-    /**
-     * 3Spline_enable_Strength of three Spline.
-     * The value shall be in the range of 0.0 to 1.0, inclusive,
-     * and in multiples of 1.0/255.
-     */
-    AVRational three_Spline_enable_Strength;
+    AVHDRVivid3SplineParams three_spline[2];
 } AVHDRVividColorToneMappingParams;
 
 

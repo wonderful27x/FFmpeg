@@ -24,6 +24,7 @@
  * VB Video decoder
  */
 
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
@@ -230,7 +231,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
     }
 
     memcpy(frame->data[1], c->pal, AVPALETTE_SIZE);
-    frame->palette_has_changed = flags & VB_HAS_PALETTE;
 
     outptr = frame->data[0];
     srcptr = c->frame;

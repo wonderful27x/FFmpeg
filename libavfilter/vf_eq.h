@@ -30,7 +30,6 @@
 
 static const char *const var_names[] = {
     "n",   // frame count
-    "pos", // frame position
     "r",   // frame rate
     "t",   // timestamp expressed in seconds
     NULL
@@ -38,7 +37,6 @@ static const char *const var_names[] = {
 
 enum var_name {
     VAR_N,
-    VAR_POS,
     VAR_R,
     VAR_T,
     VAR_NB

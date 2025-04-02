@@ -37,7 +37,6 @@ typedef struct JvContext {
     BlockDSPContext bdsp;
     AVFrame   *frame;
     uint32_t   palette[AVPALETTE_COUNT];
-    int        palette_has_changed;
 } JvContext;
 
 static av_cold int decode_init(AVCodecContext *avctx)
@@ -207,14 +206,9 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
             s->palette[i] = 0xFFU << 24 | pal << 2 | ((pal >> 4) & 0x30303);
             buf += 3;
         }
-        s->palette_has_changed = 1;
     }
 
     if (video_size) {
-        s->frame->key_frame           = 1;
-        s->frame->pict_type           = AV_PICTURE_TYPE_I;
-        s->frame->palette_has_changed = s->palette_has_changed;
-        s->palette_has_changed        = 0;
         memcpy(s->frame->data[1], s->palette, AVPALETTE_SIZE);
 
         if ((ret = av_frame_ref(rframe, s->frame)) < 0)

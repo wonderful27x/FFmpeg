@@ -144,7 +144,8 @@ const FFCodec ff_libvo_amrwbenc_encoder = {
     CODEC_LONG_NAME("Android VisualOn AMR-WB (Adaptive Multi-Rate Wide-Band)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_AMR_WB,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .p.priv_class   = &amrwb_class,
     .p.wrapper_name = "libvo_amrwbenc",
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
@@ -152,6 +153,5 @@ const FFCodec ff_libvo_amrwbenc_encoder = {
     .init           = amr_wb_encode_init,
     FF_CODEC_ENCODE_CB(amr_wb_encode_frame),
     .close          = amr_wb_encode_close,
-    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
-                                                     AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
 };

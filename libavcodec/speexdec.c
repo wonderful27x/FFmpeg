@@ -52,7 +52,10 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/avstring.h"
 #include "libavutil/float_dsp.h"
+#include "libavutil/intfloat.h"
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
@@ -1397,9 +1400,9 @@ static int parse_speex_extradata(AVCodecContext *avctx,
     const uint8_t *extradata, int extradata_size)
 {
     SpeexContext *s = avctx->priv_data;
-    const uint8_t *buf = extradata;
+    const uint8_t *buf = av_strnstr(extradata, "Speex   ", extradata_size);
 
-    if (memcmp(buf, "Speex   ", 8))
+    if (!buf)
         return AVERROR_INVALIDDATA;
 
     buf += 28;
@@ -1420,8 +1423,10 @@ static int parse_speex_extradata(AVCodecContext *avctx,
         return AVERROR_INVALIDDATA;
     s->bitrate = bytestream_get_le32(&buf);
     s->frame_size = bytestream_get_le32(&buf);
-    if (s->frame_size < NB_FRAME_SIZE << s->mode)
+    if (s->frame_size < NB_FRAME_SIZE << (s->mode > 1) ||
+        s->frame_size >     INT32_MAX >> (s->mode > 1))
         return AVERROR_INVALIDDATA;
+    s->frame_size = FFMIN(s->frame_size << (s->mode > 1), NB_FRAME_SIZE << s->mode);
     s->vbr = bytestream_get_le32(&buf);
     s->frames_per_packet = bytestream_get_le32(&buf);
     if (s->frames_per_packet <= 0 ||

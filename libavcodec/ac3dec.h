@@ -75,6 +75,29 @@ typedef struct AC3DecodeContext {
     AVCodecContext *avctx;                  ///< parent context
     GetBitContext gbc;                      ///< bitstream reader
 
+///@name Optimization
+    BswapDSPContext bdsp;
+#if USE_FIXED
+    AVFixedDSPContext *fdsp;
+#else
+    AVFloatDSPContext *fdsp;
+#endif
+    AC3DSPContext ac3dsp;
+    FmtConvertContext fmt_conv;             ///< optimized conversion functions
+///@}
+
+    AVTXContext *tx_128, *tx_256;
+    av_tx_fn tx_fn_128, tx_fn_256;
+
+    INTFLOAT *xcfptr[AC3_MAX_CHANNELS];
+    INTFLOAT *dlyptr[AC3_MAX_CHANNELS];
+
+    AVChannelLayout downmix_layout;
+    SHORTFLOAT *downmix_coeffs[2];              ///< stereo downmix coefficients
+
+// Start of flushable fields.
+// frame_type must be the flushable field, or the offset changed in ac3_decode_flush().
+
 ///@name Bit stream information
 ///@{
     int frame_type;                         ///< frame type                             (strmtyp)
@@ -90,7 +113,6 @@ typedef struct AC3DecodeContext {
     int lfe_on;                             ///< lfe channel in use
     int dialog_normalization[2];            ///< dialog level in dBFS                   (dialnorm)
     int compression_exists[2];              ///< compression field is valid for frame   (compre)
-    int compression_gain[2];                ///< gain to apply for heavy compression    (compr)
     int channel_map;                        ///< custom channel map                     (chanmap)
     int preferred_downmix;                  ///< Preferred 2-channel downmix mode       (dmixmod)
     int center_mix_level;                   ///< Center mix level index
@@ -100,8 +122,8 @@ typedef struct AC3DecodeContext {
     int lfe_mix_level_exists;               ///< indicates if lfemixlevcod is specified (lfemixlevcode)
     int lfe_mix_level;                      ///< LFE mix level index                    (lfemixlevcod)
     int eac3;                               ///< indicates if current frame is E-AC-3
-    int eac3_frame_dependent_found;         ///< bitstream has E-AC-3 dependent frame(s)
     int eac3_subsbtreamid_found;            ///< bitstream has E-AC-3 additional substream(s)
+    int eac3_extension_type_a;              ///< bitstream has E-AC-3 extension type A enabled frame(s)
     int dolby_surround_mode;                ///< dolby surround mode                    (dsurmod)
     int dolby_surround_ex_mode;             ///< dolby surround ex mode                 (dsurexmod)
     int dolby_headphone_mode;               ///< dolby headphone mode                   (dheadphonmod)
@@ -165,7 +187,6 @@ typedef struct AC3DecodeContext {
     int fbw_channels;                           ///< number of full-bandwidth channels
     int channels;                               ///< number of total channels
     int lfe_ch;                                 ///< index of LFE channel
-    SHORTFLOAT *downmix_coeffs[2];              ///< stereo downmix coefficients
     int downmixed;                              ///< indicates if coeffs are currently downmixed
     int output_mode;                            ///< output channel configuration
     int prev_output_mode;                       ///< output channel configuration for previous frame
@@ -223,24 +244,9 @@ typedef struct AC3DecodeContext {
 
 ///@name IMDCT
     int block_switch[AC3_MAX_CHANNELS];     ///< block switch flags                     (blksw)
-    AVTXContext *tx_128, *tx_256;
-    av_tx_fn tx_fn_128, tx_fn_256;
-///@}
-
-///@name Optimization
-    BswapDSPContext bdsp;
-#if USE_FIXED
-    AVFixedDSPContext *fdsp;
-#else
-    AVFloatDSPContext *fdsp;
-#endif
-    AC3DSPContext ac3dsp;
-    FmtConvertContext fmt_conv;             ///< optimized conversion functions
 ///@}
 
     SHORTFLOAT *outptr[AC3_MAX_CHANNELS];
-    INTFLOAT *xcfptr[AC3_MAX_CHANNELS];
-    INTFLOAT *dlyptr[AC3_MAX_CHANNELS];
 
 ///@name Aligned arrays
     DECLARE_ALIGNED(16, int,   fixed_coeffs)[AC3_MAX_CHANNELS][AC3_MAX_COEFS];       ///< fixed-point transform coefficients
@@ -252,8 +258,6 @@ typedef struct AC3DecodeContext {
     DECLARE_ALIGNED(32, uint8_t, input_buffer)[AC3_FRAME_BUFFER_SIZE + AV_INPUT_BUFFER_PADDING_SIZE]; ///< temp buffer to prevent overread
     DECLARE_ALIGNED(32, SHORTFLOAT, output_buffer)[EAC3_MAX_CHANNELS][AC3_BLOCK_SIZE * 6];  ///< final output buffer
 ///@}
-
-    AVChannelLayout downmix_layout;
 } AC3DecodeContext;
 
 /**

@@ -24,7 +24,7 @@
 #include "flvdec.h"
 #include "h263dec.h"
 #include "mpegvideo.h"
-#include "mpegvideodata.h"
+#include "mpegvideodec.h"
 
 int ff_flv_decode_picture_header(MpegEncContext *s)
 {
@@ -97,8 +97,6 @@ int ff_flv_decode_picture_header(MpegEncContext *s)
     if (skip_1stop_8data_bits(&s->gb) < 0)
         return AVERROR_INVALIDDATA;
 
-    s->f_code = 1;
-
     if (s->ehc_mode)
         s->avctx->sample_aspect_ratio= (AVRational){1,2};
 
@@ -118,11 +116,10 @@ const FFCodec ff_flv_decoder = {
     .p.id           = AV_CODEC_ID_FLV1,
     .priv_data_size = sizeof(MpegEncContext),
     .init           = ff_h263_decode_init,
-    .close          = ff_h263_decode_end,
     FF_CODEC_DECODE_CB(ff_h263_decode_frame),
+    .close          = ff_mpv_decode_close,
     .p.capabilities = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP |
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .p.max_lowres   = 3,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
-                                                     AV_PIX_FMT_NONE },
 };

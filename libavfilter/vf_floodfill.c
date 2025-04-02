@@ -18,12 +18,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "formats.h"
-#include "internal.h"
+#include "filters.h"
 #include "video.h"
 
 typedef struct Points {
@@ -315,8 +315,10 @@ static int filter_frame(AVFilterLink *link, AVFrame *frame)
             s->front++;
         }
 
-        if (ret = av_frame_make_writable(frame))
+        if (ret = ff_inlink_make_frame_writable(link, &frame)) {
+            av_frame_free(&frame);
             return ret;
+        }
 
         while (s->front > s->back) {
             int x, y;
@@ -382,13 +384,6 @@ static const AVFilterPad floodfill_inputs[] = {
     },
 };
 
-static const AVFilterPad floodfill_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 #define OFFSET(x) offsetof(FloodfillContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
@@ -408,14 +403,14 @@ static const AVOption floodfill_options[] = {
 
 AVFILTER_DEFINE_CLASS(floodfill);
 
-const AVFilter ff_vf_floodfill = {
-    .name          = "floodfill",
-    .description   = NULL_IF_CONFIG_SMALL("Fill area with same color with another color."),
+const FFFilter ff_vf_floodfill = {
+    .p.name        = "floodfill",
+    .p.description = NULL_IF_CONFIG_SMALL("Fill area with same color with another color."),
+    .p.priv_class  = &floodfill_class,
+    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
     .priv_size     = sizeof(FloodfillContext),
-    .priv_class    = &floodfill_class,
     .uninit        = uninit,
     FILTER_INPUTS(floodfill_inputs),
-    FILTER_OUTPUTS(floodfill_outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_PIXFMTS_ARRAY(pixel_fmts),
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };

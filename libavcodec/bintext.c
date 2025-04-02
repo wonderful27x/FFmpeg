@@ -157,7 +157,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
     if ((ret = ff_get_buffer(avctx, s->frame, 0)) < 0)
         return ret;
     s->frame->pict_type           = AV_PICTURE_TYPE_I;
-    s->frame->palette_has_changed = 1;
     memcpy(s->frame->data[1], s->palette, 16 * 4);
 
     if (avctx->codec_id == AV_CODEC_ID_XBIN) {

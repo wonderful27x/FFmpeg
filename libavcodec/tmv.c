@@ -56,11 +56,8 @@ static int tmv_decode_frame(AVCodecContext *avctx, AVFrame *frame,
         return AVERROR_INVALIDDATA;
     }
 
-    frame->pict_type = AV_PICTURE_TYPE_I;
-    frame->key_frame = 1;
     dst              = frame->data[0];
 
-    frame->palette_has_changed = 1;
     memcpy(frame->data[1], ff_cga_palette, 16 * 4);
     memset(frame->data[1] + 16 * 4, 0, AVPALETTE_SIZE - 16 * 4);
 

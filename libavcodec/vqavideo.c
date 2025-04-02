@@ -73,6 +73,7 @@
 #include <string.h>
 
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
@@ -809,7 +810,6 @@ static int vqa_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
 
         /* make the palette available on the way out */
         memcpy(s->frame->data[1], s->palette, PALETTE_COUNT * 4);
-        s->frame->palette_has_changed = 1;
     } else if (avctx->pix_fmt == AV_PIX_FMT_RGB555LE) {
         if ((res = vqa_decode_frame_hicolor(s, s->frame)) < 0)
             return res;

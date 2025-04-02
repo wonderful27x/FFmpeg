@@ -1241,15 +1241,11 @@ const FFCodec ff_g723_1_encoder = {
     CODEC_LONG_NAME("G.723.1"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_G723_1,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(G723_1_Context),
     .init           = g723_1_encode_init,
     FF_CODEC_ENCODE_CB(g723_1_encode_frame),
     .defaults       = defaults,
-    .p.sample_fmts  = (const enum AVSampleFormat[]) {
-        AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_NONE
-    },
-    .p.ch_layouts   = (const AVChannelLayout[]){
-        AV_CHANNEL_LAYOUT_MONO, { 0 }
-    },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
+    CODEC_CH_LAYOUTS(AV_CHANNEL_LAYOUT_MONO),
 };

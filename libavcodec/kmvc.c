@@ -273,7 +273,7 @@ static int decode_frame(AVCodecContext * avctx, AVFrame *frame,
     if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
         return ret;
 
-    frame->palette_has_changed = ff_copy_palette(ctx->pal, avpkt, avctx);
+    ff_copy_palette(ctx->pal, avpkt, avctx);
 
     header = bytestream2_get_byte(&ctx->g);
 
@@ -288,15 +288,14 @@ static int decode_frame(AVCodecContext * avctx, AVFrame *frame,
     }
 
     if (header & KMVC_KEYFRAME) {
-        frame->key_frame = 1;
+        frame->flags |= AV_FRAME_FLAG_KEY;
         frame->pict_type = AV_PICTURE_TYPE_I;
     } else {
-        frame->key_frame = 0;
+        frame->flags &= ~AV_FRAME_FLAG_KEY;
         frame->pict_type = AV_PICTURE_TYPE_P;
     }
 
     if (header & KMVC_PALETTE) {
-        frame->palette_has_changed = 1;
         // palette starts from index 1 and has 127 entries
         for (i = 1; i <= ctx->palsize; i++) {
             ctx->pal[i] = 0xFFU << 24 | bytestream2_get_be24(&ctx->g);
@@ -305,7 +304,6 @@ static int decode_frame(AVCodecContext * avctx, AVFrame *frame,
 
     if (ctx->setpal) {
         ctx->setpal = 0;
-        frame->palette_has_changed = 1;
     }
 
     /* make the palette available on the way out */

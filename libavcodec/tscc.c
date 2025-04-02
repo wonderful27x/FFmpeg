@@ -34,6 +34,7 @@
  * Supports: BGR8,BGR555,BGR24 - only BGR8 and BGR555 tested
  */
 
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
@@ -106,7 +107,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
 
     /* make the palette available on the way out */
     if (c->avctx->pix_fmt == AV_PIX_FMT_PAL8) {
-        frame->palette_has_changed = palette_has_changed;
         memcpy(frame->data[1], c->pal, AVPALETTE_SIZE);
     }
 

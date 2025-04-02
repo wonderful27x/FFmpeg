@@ -103,8 +103,8 @@ static av_cold void build_vlc(VLC *vlc, unsigned *buf_offset,
         for (unsigned tmp = num + codes_counts[i - 1]; num < tmp; num++)
             len[num] = i;
 
-    ff_init_vlc_from_lengths(vlc, FFMIN(len[0], 9), num, len, 1,
-                             *syms, 1, 1, offset, INIT_VLC_STATIC_OVERLONG, NULL);
+    ff_vlc_init_from_lengths(vlc, FFMIN(len[0], 9), num, len, 1,
+                             *syms, 1, 1, offset, VLC_INIT_STATIC_OVERLONG, NULL);
     *buf_offset += vlc->table_size;
     *syms       += num;
 }
@@ -393,6 +393,5 @@ const FFCodec ff_mpc8_decoder = {
     FF_CODEC_DECODE_CB(mpc8_decode_frame),
     .flush          = mpc8_decode_flush,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
-    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
-                                                      AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16P),
 };

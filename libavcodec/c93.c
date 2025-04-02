@@ -147,10 +147,10 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     b = bytestream2_get_byte(&gb);
     if (b & C93_FIRST_FRAME) {
         newpic->pict_type = AV_PICTURE_TYPE_I;
-        newpic->key_frame = 1;
+        newpic->flags |= AV_FRAME_FLAG_KEY;
     } else {
         newpic->pict_type = AV_PICTURE_TYPE_P;
-        newpic->key_frame = 0;
+        newpic->flags &= ~AV_FRAME_FLAG_KEY;
     }
 
     for (y = 0; y < HEIGHT; y += 8) {
@@ -246,7 +246,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
         for (i = 0; i < 256; i++) {
             palette[i] = 0xFFU << 24 | bytestream2_get_be24(&gb);
         }
-        newpic->palette_has_changed = 1;
     } else {
         if (oldpic->data[1])
             memcpy(newpic->data[1], oldpic->data[1], 256 * 4);

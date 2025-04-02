@@ -40,6 +40,8 @@ int ff_aac_ac3_parse(AVCodecParserContext *s1,
     int new_frame_start;
     int got_frame = 0;
 
+    s1->key_frame = -1;
+
     if (s1->flags & PARSER_FLAG_COMPLETE_FRAMES) {
         i = buf_size;
         got_frame = 1;
@@ -95,6 +97,7 @@ get_next:
            duration in seconds is still correct (as is the number of bits in
            the frame). */
         if (avctx->codec_id != AV_CODEC_ID_AAC) {
+#if CONFIG_AC3_PARSER
             AC3HeaderInfo hdr, *phrd = &hdr;
             int offset = ff_ac3_find_syncword(buf, buf_size);
 
@@ -134,26 +137,27 @@ get_next:
                     avctx->ch_layout.order       = AV_CHANNEL_ORDER_UNSPEC;
                     avctx->ch_layout.nb_channels = hdr.channels;
                 }
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-                avctx->channels = avctx->ch_layout.nb_channels;
-                avctx->channel_layout = hdr.channel_layout;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
             }
             s1->duration = hdr.num_blocks * 256;
             avctx->audio_service_type = hdr.bitstream_mode;
             if (hdr.bitstream_mode == 0x7 && hdr.channels > 1)
                 avctx->audio_service_type = AV_AUDIO_SERVICE_TYPE_KARAOKE;
             bit_rate = hdr.bit_rate;
+#endif
         } else {
-            AACADTSHeaderInfo hdr, *phrd = &hdr;
-            int ret = avpriv_adts_header_parse(&phrd, buf, buf_size);
+#if CONFIG_AAC_PARSER
+            AACADTSHeaderInfo hdr;
+            GetBitContext gb;
 
-            if (ret < 0)
+            init_get_bits8(&gb, buf, buf_size);
+            if (buf_size < AV_AAC_ADTS_HEADER_SIZE ||
+                ff_adts_header_parse(&gb, &hdr) < 0)
                 return i;
 
+            avctx->profile = hdr.object_type - 1;
+            s1->key_frame = (avctx->profile == AV_PROFILE_AAC_USAC) ? get_bits1(&gb) : 1;
             bit_rate = hdr.bit_rate;
+#endif
         }
 
         /* Calculate the average bit rate */

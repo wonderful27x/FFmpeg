@@ -182,7 +182,6 @@ static int seqvideo_decode(SeqVideoContext *seq, const unsigned char *data, int 
                 c[j] = (*data << 2) | (*data >> 4);
             palette[i] = 0xFFU << 24 | AV_RB24(c);
         }
-        seq->frame->palette_has_changed = 1;
     }
 
     if (flags & 2) {

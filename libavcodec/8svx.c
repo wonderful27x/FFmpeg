@@ -40,6 +40,7 @@
 #include "config_components.h"
 
 #include "libavutil/avassert.h"
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
@@ -151,7 +152,7 @@ static int eightsvx_decode_frame(AVCodecContext *avctx, AVFrame *frame,
 
     *got_frame_ptr = 1;
 
-    return ((avctx->frame_number == 0) * hdr_size + buf_size) * channels;
+    return ((avctx->frame_num == 0) * hdr_size + buf_size) * channels;
 }
 
 static av_cold int eightsvx_decode_init(AVCodecContext *avctx)
@@ -197,8 +198,7 @@ const FFCodec ff_eightsvx_fib_decoder = {
   FF_CODEC_DECODE_CB(eightsvx_decode_frame),
   .close          = eightsvx_decode_close,
   .p.capabilities = AV_CODEC_CAP_DR1,
-  .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_U8P,
-                                                    AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_U8P),
 };
 #endif
 #if CONFIG_EIGHTSVX_EXP_DECODER
@@ -212,7 +212,6 @@ const FFCodec ff_eightsvx_exp_decoder = {
   FF_CODEC_DECODE_CB(eightsvx_decode_frame),
   .close          = eightsvx_decode_close,
   .p.capabilities = AV_CODEC_CAP_DR1,
-  .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_U8P,
-                                                    AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_U8P),
 };
 #endif

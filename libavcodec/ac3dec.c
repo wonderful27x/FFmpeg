@@ -35,10 +35,10 @@
 #include "libavutil/crc.h"
 #include "libavutil/downmix_info.h"
 #include "libavutil/intmath.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/thread.h"
 #include "bswapdsp.h"
-#include "aac_ac3_parser.h"
 #include "ac3_parser_internal.h"
 #include "ac3dec.h"
 #include "ac3dec_data.h"
@@ -190,14 +190,6 @@ static void ac3_downmix(AVCodecContext *avctx)
     const AVChannelLayout stereo = (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
 
     /* allow downmixing to stereo or mono */
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-    if (avctx->request_channel_layout) {
-        av_channel_layout_uninit(&s->downmix_layout);
-        av_channel_layout_from_mask(&s->downmix_layout, avctx->request_channel_layout);
-    }
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     if (avctx->ch_layout.nb_channels > 1 &&
         !av_channel_layout_compare(&s->downmix_layout, &mono)) {
         av_channel_layout_uninit(&avctx->ch_layout);
@@ -207,7 +199,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
         av_channel_layout_uninit(&avctx->ch_layout);
         avctx->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
     }
-    s->downmixed = 1;
 }
 
 /**
@@ -249,6 +240,7 @@ static av_cold int ac3_decode_init(AVCodecContext *avctx)
         avctx->sample_fmt = AV_SAMPLE_FMT_FLTP;
 
     ac3_downmix(avctx);
+    s->downmixed = 1;
 
     for (i = 0; i < AC3_MAX_CHANNELS; i++) {
         s->xcfptr[i] = s->transform_coeffs[i];
@@ -258,6 +250,16 @@ static av_cold int ac3_decode_init(AVCodecContext *avctx)
     ff_thread_once(&init_static_once, ac3_tables_init);
 
     return 0;
+}
+
+static av_cold void ac3_decode_flush(AVCodecContext *avctx)
+{
+    AC3DecodeContext *s = avctx->priv_data;
+
+    memset(&s->frame_type, 0, sizeof(*s) - offsetof(AC3DecodeContext, frame_type));
+
+    AC3_RENAME(ff_kbd_window_init)(s->window, 5.0, 256);
+    av_lfg_init(&s->dith_state, 0);
 }
 
 /**
@@ -353,9 +355,11 @@ static int parse_frame_header(AC3DecodeContext *s)
     s->frame_size                   = hdr.frame_size;
     s->superframe_size             += hdr.frame_size;
     s->preferred_downmix            = AC3_DMIXMOD_NOTINDICATED;
-    s->center_mix_level             = hdr.center_mix_level;
+    if (hdr.bitstream_id <= 10) {
+        s->center_mix_level         = hdr.center_mix_level;
+        s->surround_mix_level       = hdr.surround_mix_level;
+    }
     s->center_mix_level_ltrt        = 4; // -3.0dB
-    s->surround_mix_level           = hdr.surround_mix_level;
     s->surround_mix_level_ltrt      = 4; // -3.0dB
     s->lfe_mix_level_exists         = 0;
     s->num_blocks                   = hdr.num_blocks;
@@ -1506,7 +1510,6 @@ static int ac3_decode_frame(AVCodecContext *avctx, AVFrame *frame,
     uint8_t extended_channel_map[EAC3_MAX_CHANNELS];
     const SHORTFLOAT *output[AC3_MAX_CHANNELS];
     enum AVMatrixEncoding matrix_encoding;
-    AVDownmixInfo *downmix_info;
     uint64_t mask;
 
     s->superframe_size = 0;
@@ -1545,19 +1548,19 @@ dependent_frame:
 
     if (err) {
         switch (err) {
-        case AAC_AC3_PARSE_ERROR_SYNC:
+        case AC3_PARSE_ERROR_SYNC:
             av_log(avctx, AV_LOG_ERROR, "frame sync error\n");
             return AVERROR_INVALIDDATA;
-        case AAC_AC3_PARSE_ERROR_BSID:
+        case AC3_PARSE_ERROR_BSID:
             av_log(avctx, AV_LOG_ERROR, "invalid bitstream id\n");
             break;
-        case AAC_AC3_PARSE_ERROR_SAMPLE_RATE:
+        case AC3_PARSE_ERROR_SAMPLE_RATE:
             av_log(avctx, AV_LOG_ERROR, "invalid sample rate\n");
             break;
-        case AAC_AC3_PARSE_ERROR_FRAME_SIZE:
+        case AC3_PARSE_ERROR_FRAME_SIZE:
             av_log(avctx, AV_LOG_ERROR, "invalid frame size\n");
             break;
-        case AAC_AC3_PARSE_ERROR_FRAME_TYPE:
+        case AC3_PARSE_ERROR_FRAME_TYPE:
             /* skip frame if CRC is ok. otherwise use error concealment. */
             /* TODO: add support for substreams */
             if (s->substreamid) {
@@ -1570,8 +1573,7 @@ dependent_frame:
                 av_log(avctx, AV_LOG_ERROR, "invalid frame type\n");
             }
             break;
-        case AAC_AC3_PARSE_ERROR_CRC:
-        case AAC_AC3_PARSE_ERROR_CHANNEL_CFG:
+        case AC3_PARSE_ERROR_CRC:
             break;
         default: // Normal AVERROR do not try to recover.
             *got_frame_ptr = 0;
@@ -1581,7 +1583,7 @@ dependent_frame:
         /* check that reported frame size fits in input buffer */
         if (s->frame_size > buf_size) {
             av_log(avctx, AV_LOG_ERROR, "incomplete frame\n");
-            err = AAC_AC3_PARSE_ERROR_FRAME_SIZE;
+            err = AC3_PARSE_ERROR_FRAME_SIZE;
         } else if (avctx->err_recognition & (AV_EF_CRCCHECK|AV_EF_CAREFUL)) {
             /* check for crc mismatch */
             if (av_crc(av_crc_get_table(AV_CRC_16_ANSI), 0, &buf[2],
@@ -1589,7 +1591,7 @@ dependent_frame:
                 av_log(avctx, AV_LOG_ERROR, "frame CRC mismatch\n");
                 if (avctx->err_recognition & AV_EF_EXPLODE)
                     return AVERROR_INVALIDDATA;
-                err = AAC_AC3_PARSE_ERROR_CRC;
+                err = AC3_PARSE_ERROR_CRC;
             }
         }
     }
@@ -1618,8 +1620,22 @@ dependent_frame:
 
         s->loro_center_mix_level   = gain_levels[s->  center_mix_level];
         s->loro_surround_mix_level = gain_levels[s->surround_mix_level];
-        s->ltrt_center_mix_level   = LEVEL_MINUS_3DB;
-        s->ltrt_surround_mix_level = LEVEL_MINUS_3DB;
+        s->ltrt_center_mix_level   = gain_levels[s->  center_mix_level_ltrt];
+        s->ltrt_surround_mix_level = gain_levels[s->surround_mix_level_ltrt];
+        switch (s->preferred_downmix) {
+        case AC3_DMIXMOD_LTRT:
+            s->preferred_stereo_downmix = AV_DOWNMIX_TYPE_LTRT;
+            break;
+        case AC3_DMIXMOD_LORO:
+            s->preferred_stereo_downmix = AV_DOWNMIX_TYPE_LORO;
+            break;
+        case AC3_DMIXMOD_DPLII:
+            s->preferred_stereo_downmix = AV_DOWNMIX_TYPE_DPLII;
+            break;
+        default:
+            s->preferred_stereo_downmix = AV_DOWNMIX_TYPE_UNKNOWN;
+            break;
+        }
         /* set downmixing coefficients if needed */
         if (s->channels != s->out_channels && !((s->output_mode & AC3_OUTPUT_LFEON) &&
                 s->fbw_channels == s->out_channels)) {
@@ -1714,6 +1730,12 @@ skip:
     if (!err) {
         avctx->sample_rate = s->sample_rate;
         avctx->bit_rate    = s->bit_rate + s->prev_bit_rate;
+        avctx->profile     = s->eac3_extension_type_a == 1 ? AV_PROFILE_EAC3_DDP_ATMOS : AV_PROFILE_UNKNOWN;
+    }
+
+    if (!avctx->sample_rate) {
+        av_log(avctx, AV_LOG_ERROR, "Could not determine the sample rate\n");
+        return AVERROR_INVALIDDATA;
     }
 
     for (ch = 0; ch < EAC3_MAX_CHANNELS; ch++)
@@ -1814,11 +1836,16 @@ skip:
             break;
         }
     }
-    if ((ret = ff_side_data_update_matrix_encoding(frame, matrix_encoding)) < 0)
+    if (matrix_encoding != AV_MATRIX_ENCODING_NONE &&
+        (ret = ff_side_data_update_matrix_encoding(frame, matrix_encoding)) < 0)
         return ret;
 
     /* AVDownmixInfo */
-    if ((downmix_info = av_downmix_info_update_side_data(frame))) {
+    if ( (s->channel_mode                     > AC3_CHMODE_STEREO) &&
+        ((s->output_mode & ~AC3_OUTPUT_LFEON) > AC3_CHMODE_STEREO)) {
+        AVDownmixInfo *downmix_info = av_downmix_info_update_side_data(frame);
+        if (!downmix_info)
+            return AVERROR(ENOMEM);
         switch (s->preferred_downmix) {
         case AC3_DMIXMOD_LTRT:
             downmix_info->preferred_downmix_type = AV_DOWNMIX_TYPE_LTRT;
@@ -1841,8 +1868,7 @@ skip:
             downmix_info->lfe_mix_level       = gain_levels_lfe[s->lfe_mix_level];
         else
             downmix_info->lfe_mix_level       = 0.0; // -inf dB
-    } else
-        return AVERROR(ENOMEM);
+    }
 
     *got_frame_ptr = 1;
 

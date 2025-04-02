@@ -27,10 +27,11 @@
  * @see http://notbrainsurgery.livejournal.com/29773.html
  */
 
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
 
 #define HIST_SIZE (3*256)
 
@@ -42,6 +43,7 @@ struct thumb_frame {
 typedef struct ThumbContext {
     const AVClass *class;
     int n;                      ///< current frame
+    int loglevel;
     int n_frames;               ///< number of frames for analysis
     struct thumb_frame *frames; ///< the n_frames frames
     AVRational tb;              ///< copy of the input timebase to ease access
@@ -58,6 +60,10 @@ typedef struct ThumbContext {
 
 static const AVOption thumbnail_options[] = {
     { "n", "set the frames batch size", OFFSET(n_frames), AV_OPT_TYPE_INT, {.i64=100}, 2, INT_MAX, FLAGS },
+    { "log", "force stats logging level", OFFSET(loglevel), AV_OPT_TYPE_INT, {.i64 = AV_LOG_INFO}, INT_MIN, INT_MAX, FLAGS, .unit = "level" },
+        { "quiet",   "logging disabled",          0, AV_OPT_TYPE_CONST, {.i64 = AV_LOG_QUIET},   0, 0, FLAGS, .unit = "level" },
+        { "info",    "information logging level", 0, AV_OPT_TYPE_CONST, {.i64 = AV_LOG_INFO},    0, 0, FLAGS, .unit = "level" },
+        { "verbose", "verbose logging level",     0, AV_OPT_TYPE_CONST, {.i64 = AV_LOG_VERBOSE}, 0, 0, FLAGS, .unit = "level" },
     { NULL }
 };
 
@@ -127,9 +133,10 @@ static AVFrame *get_best_frame(AVFilterContext *ctx)
 
     // raise the chosen one
     picref = s->frames[best_frame_idx].buf;
-    av_log(ctx, AV_LOG_INFO, "frame id #%d (pts_time=%f) selected "
-           "from a set of %d images\n", best_frame_idx,
-           picref->pts * av_q2d(s->tb), nb_frames);
+    if (s->loglevel != AV_LOG_QUIET)
+        av_log(ctx, s->loglevel, "frame id #%d (pts_time=%f) selected "
+               "from a set of %d images\n", best_frame_idx,
+               picref->pts * av_q2d(s->tb), nb_frames);
     s->frames[best_frame_idx].buf = NULL;
 
     return picref;
@@ -191,11 +198,14 @@ static int do_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
             const int slice_start = (s->planeheight[plane] * jobnr) / nb_jobs;
             const int slice_end = (s->planeheight[plane] * (jobnr+1)) / nb_jobs;
             const uint8_t *p = frame->data[plane] + slice_start * frame->linesize[plane];
+            const ptrdiff_t linesize = frame->linesize[plane];
+            const int planewidth = s->planewidth[plane];
+            int *hhist = hist + 256 * plane;
 
             for (int j = slice_start; j < slice_end; j++) {
-                for (int i = 0; i < s->planewidth[plane]; i++)
-                    hist[256*plane + p[i]]++;
-                p += frame->linesize[plane];
+                for (int i = 0; i < planewidth; i++)
+                    hhist[p[i]]++;
+                p += linesize;
             }
         }
         break;
@@ -314,16 +324,16 @@ static const AVFilterPad thumbnail_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_thumbnail = {
-    .name          = "thumbnail",
-    .description   = NULL_IF_CONFIG_SMALL("Select the most representative frame in a given sequence of consecutive frames."),
+const FFFilter ff_vf_thumbnail = {
+    .p.name        = "thumbnail",
+    .p.description = NULL_IF_CONFIG_SMALL("Select the most representative frame in a given sequence of consecutive frames."),
+    .p.priv_class  = &thumbnail_class,
+    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC |
+                     AVFILTER_FLAG_SLICE_THREADS,
     .priv_size     = sizeof(ThumbContext),
     .init          = init,
     .uninit        = uninit,
     FILTER_INPUTS(thumbnail_inputs),
     FILTER_OUTPUTS(thumbnail_outputs),
     FILTER_PIXFMTS_ARRAY(pix_fmts),
-    .priv_class    = &thumbnail_class,
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC |
-                     AVFILTER_FLAG_SLICE_THREADS,
 };

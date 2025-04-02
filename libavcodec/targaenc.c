@@ -21,6 +21,7 @@
 
 #include <string.h>
 
+#include "libavutil/avassert.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
@@ -89,10 +90,11 @@ static int targa_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     TargaContext *s = avctx->priv_data;
     int bpp, picsize, datasize = -1, ret, i;
     uint8_t *out;
+    int maxpal = 32*32;
 
     picsize = av_image_get_buffer_size(avctx->pix_fmt,
                                        avctx->width, avctx->height, 1);
-    if ((ret = ff_alloc_packet(avctx, pkt, picsize + 45)) < 0)
+    if ((ret = ff_alloc_packet(avctx, pkt, picsize + 45 + maxpal)) < 0)
         return ret;
 
     /* zero out the header and only set applicable fields */
@@ -125,6 +127,7 @@ static int targa_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
             AV_WL24(pkt->data + 18 + 3 * i, *(uint32_t *)(p->data[1] + i * 4));
             }
         out += 32 * pal_bpp;        /* skip past the palette we just output */
+        av_assert0(32 * pal_bpp <= maxpal);
         break;
         }
     case AV_PIX_FMT_GRAY8:
@@ -207,13 +210,11 @@ const FFCodec ff_targa_encoder = {
     CODEC_LONG_NAME("Truevision Targa image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_TARGA,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(TargaContext),
     .p.priv_class   = &targa_class,
     .init           = targa_encode_init,
     FF_CODEC_ENCODE_CB(targa_encode_frame),
-    .p.pix_fmts     = (const enum AVPixelFormat[]){
-        AV_PIX_FMT_BGR24, AV_PIX_FMT_BGRA, AV_PIX_FMT_RGB555LE, AV_PIX_FMT_GRAY8, AV_PIX_FMT_PAL8,
-        AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_BGR24, AV_PIX_FMT_BGRA, AV_PIX_FMT_RGB555LE,
+                  AV_PIX_FMT_GRAY8, AV_PIX_FMT_PAL8),
 };

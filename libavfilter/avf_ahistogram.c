@@ -19,14 +19,12 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
-#include "libavutil/parseutils.h"
 #include "avfilter.h"
 #include "filters.h"
 #include "formats.h"
-#include "audio.h"
 #include "video.h"
-#include "internal.h"
 
 enum DisplayScale   { LINEAR, SQRT, CBRT, LOG, RLOG, NB_SCALES };
 enum AmplitudeScale { ALINEAR, ALOG, NB_ASCALES };
@@ -65,57 +63,50 @@ typedef struct AudioHistogramContext {
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static const AVOption ahistogram_options[] = {
-    { "dmode", "set method to display channels", OFFSET(dmode), AV_OPT_TYPE_INT, {.i64=SINGLE}, 0, NB_DMODES-1, FLAGS, "dmode" },
-        { "single", "all channels use single histogram", 0, AV_OPT_TYPE_CONST, {.i64=SINGLE},   0, 0, FLAGS, "dmode" },
-        { "separate", "each channel have own histogram", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, "dmode" },
+    { "dmode", "set method to display channels", OFFSET(dmode), AV_OPT_TYPE_INT, {.i64=SINGLE}, 0, NB_DMODES-1, FLAGS, .unit = "dmode" },
+        { "single", "all channels use single histogram", 0, AV_OPT_TYPE_CONST, {.i64=SINGLE},   0, 0, FLAGS, .unit = "dmode" },
+        { "separate", "each channel have own histogram", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, .unit = "dmode" },
     { "rate", "set video rate", OFFSET(frame_rate), AV_OPT_TYPE_VIDEO_RATE, {.str="25"}, 0, INT_MAX, FLAGS },
     { "r",    "set video rate", OFFSET(frame_rate), AV_OPT_TYPE_VIDEO_RATE, {.str="25"}, 0, INT_MAX, FLAGS },
     { "size", "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str="hd720"}, 0, 0, FLAGS },
     { "s",    "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str="hd720"}, 0, 0, FLAGS },
-    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=LOG}, LINEAR, NB_SCALES-1, FLAGS, "scale" },
-        { "log",  "logarithmic",         0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, "scale" },
-        { "sqrt", "square root",         0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, "scale" },
-        { "cbrt", "cubic root",          0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, "scale" },
-        { "lin",  "linear",              0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, "scale" },
-        { "rlog", "reverse logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=RLOG},   0, 0, FLAGS, "scale" },
-    { "ascale", "set amplitude scale", OFFSET(ascale), AV_OPT_TYPE_INT, {.i64=ALOG}, LINEAR, NB_ASCALES-1, FLAGS, "ascale" },
-        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=ALOG},    0, 0, FLAGS, "ascale" },
-        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=ALINEAR}, 0, 0, FLAGS, "ascale" },
+    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=LOG}, LINEAR, NB_SCALES-1, FLAGS, .unit = "scale" },
+        { "log",  "logarithmic",         0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, .unit = "scale" },
+        { "sqrt", "square root",         0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, .unit = "scale" },
+        { "cbrt", "cubic root",          0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, .unit = "scale" },
+        { "lin",  "linear",              0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, .unit = "scale" },
+        { "rlog", "reverse logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=RLOG},   0, 0, FLAGS, .unit = "scale" },
+    { "ascale", "set amplitude scale", OFFSET(ascale), AV_OPT_TYPE_INT, {.i64=ALOG}, LINEAR, NB_ASCALES-1, FLAGS, .unit = "ascale" },
+        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=ALOG},    0, 0, FLAGS, .unit = "ascale" },
+        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=ALINEAR}, 0, 0, FLAGS, .unit = "ascale" },
     { "acount", "how much frames to accumulate", OFFSET(count), AV_OPT_TYPE_INT, {.i64=1}, -1, 100, FLAGS },
     { "rheight", "set histogram ratio of window height", OFFSET(phisto), AV_OPT_TYPE_FLOAT, {.dbl=0.10}, 0, 1, FLAGS },
-    { "slide", "set sonogram sliding", OFFSET(slide), AV_OPT_TYPE_INT, {.i64=REPLACE}, 0, NB_SLIDES-1, FLAGS, "slide" },
-        { "replace", "replace old rows with new", 0, AV_OPT_TYPE_CONST, {.i64=REPLACE},    0, 0, FLAGS, "slide" },
-        { "scroll",  "scroll from top to bottom", 0, AV_OPT_TYPE_CONST, {.i64=SCROLL}, 0, 0, FLAGS, "slide" },
-    { "hmode", "set histograms mode", OFFSET(hmode), AV_OPT_TYPE_INT, {.i64=ABS}, 0, NB_HMODES-1, FLAGS, "hmode" },
-        { "abs",  "use absolute samples",  0, AV_OPT_TYPE_CONST, {.i64=ABS}, 0, 0, FLAGS, "hmode" },
-        { "sign", "use unchanged samples", 0, AV_OPT_TYPE_CONST, {.i64=SIGN},0, 0, FLAGS, "hmode" },
+    { "slide", "set sonogram sliding", OFFSET(slide), AV_OPT_TYPE_INT, {.i64=REPLACE}, 0, NB_SLIDES-1, FLAGS, .unit = "slide" },
+        { "replace", "replace old rows with new", 0, AV_OPT_TYPE_CONST, {.i64=REPLACE},    0, 0, FLAGS, .unit = "slide" },
+        { "scroll",  "scroll from top to bottom", 0, AV_OPT_TYPE_CONST, {.i64=SCROLL}, 0, 0, FLAGS, .unit = "slide" },
+    { "hmode", "set histograms mode", OFFSET(hmode), AV_OPT_TYPE_INT, {.i64=ABS}, 0, NB_HMODES-1, FLAGS, .unit = "hmode" },
+        { "abs",  "use absolute samples",  0, AV_OPT_TYPE_CONST, {.i64=ABS}, 0, 0, FLAGS, .unit = "hmode" },
+        { "sign", "use unchanged samples", 0, AV_OPT_TYPE_CONST, {.i64=SIGN},0, 0, FLAGS, .unit = "hmode" },
     { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(ahistogram);
 
-static int query_formats(AVFilterContext *ctx)
+static int query_formats(const AVFilterContext *ctx,
+                         AVFilterFormatsConfig **cfg_in,
+                         AVFilterFormatsConfig **cfg_out)
 {
     AVFilterFormats *formats = NULL;
-    AVFilterChannelLayouts *layouts = NULL;
-    AVFilterLink *inlink = ctx->inputs[0];
-    AVFilterLink *outlink = ctx->outputs[0];
     static const enum AVSampleFormat sample_fmts[] = { AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_NONE };
     static const enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUVA444P, AV_PIX_FMT_NONE };
     int ret = AVERROR(EINVAL);
 
     formats = ff_make_format_list(sample_fmts);
-    if ((ret = ff_formats_ref         (formats, &inlink->outcfg.formats        )) < 0 ||
-        (layouts = ff_all_channel_counts()) == NULL ||
-        (ret = ff_channel_layouts_ref (layouts, &inlink->outcfg.channel_layouts)) < 0)
-        return ret;
-
-    formats = ff_all_samplerates();
-    if ((ret = ff_formats_ref(formats, &inlink->outcfg.samplerates)) < 0)
+    if ((ret = ff_formats_ref(formats, &cfg_in[0]->formats)) < 0)
         return ret;
 
     formats = ff_make_format_list(pix_fmts);
-    if ((ret = ff_formats_ref(formats, &outlink->incfg.formats)) < 0)
+    if ((ret = ff_formats_ref(formats, &cfg_out[0]->formats)) < 0)
         return ret;
 
     return 0;
@@ -162,12 +153,13 @@ static int get_log_bin_sign(float in, int w)
 static int config_output(AVFilterLink *outlink)
 {
     AudioHistogramContext *s = outlink->src->priv;
+    FilterLink *l = ff_filter_link(outlink);
 
     outlink->w = s->w;
     outlink->h = s->h;
     outlink->sample_aspect_ratio = (AVRational){1,1};
-    outlink->frame_rate = s->frame_rate;
-    outlink->time_base = av_inv_q(outlink->frame_rate);
+    l->frame_rate = s->frame_rate;
+    outlink->time_base = av_inv_q(l->frame_rate);
 
     s->histogram_h = s->h * s->phisto;
     s->ypos = s->h * s->phisto;
@@ -207,9 +199,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFilterContext *ctx = inlink->dst;
     AVFilterLink *outlink = ctx->outputs[0];
     AudioHistogramContext *s = ctx->priv;
+    const int nb_samples = in->nb_samples;
     const int H = s->histogram_h;
     const int w = s->w;
-    int c, y, n, p, bin;
+    int c, y, n, p, bin, ret;
     uint64_t acmax = 1;
     AVFrame *clone;
 
@@ -229,7 +222,12 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         }
     }
 
-    av_frame_make_writable(s->out);
+    ret = ff_inlink_make_frame_writable(outlink, &s->out);
+    if (ret < 0) {
+        av_frame_free(&in);
+        return ret;
+    }
+
     if (s->dmode == SEPARATE) {
         for (y = 0; y < w; y++) {
             s->combine_buffer[3 * y    ] = 0;
@@ -255,7 +253,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             const float *src = (const float *)in->extended_data[c];
             uint64_t *achistogram = &s->achistogram[(s->dmode == SINGLE ? 0: c) * w];
 
-            for (n = 0; n < in->nb_samples; n++) {
+            for (n = 0; n < nb_samples; n++) {
                 bin = s->get_bin(src[n], w);
 
                 achistogram[bin]++;
@@ -265,7 +263,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                 uint64_t *shistogram = &s->shistogram[(s->dmode == SINGLE ? 0: c) * w];
                 const float *src2 = (const float *)s->in[s->first]->extended_data[c];
 
-                for (n = 0; n < in->nb_samples; n++) {
+                for (n = 0; n < nb_samples; n++) {
                     bin = s->get_bin(src2[n], w);
 
                     shistogram[bin]++;
@@ -278,7 +276,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             const float *src = (const float *)in->extended_data[c];
             uint64_t *achistogram = &s->achistogram[(s->dmode == SINGLE ? 0: c) * w];
 
-            for (n = 0; n < in->nb_samples; n++) {
+            for (n = 0; n < nb_samples; n++) {
                 bin = s->get_bin(src[n], w);
 
                 achistogram[bin]++;
@@ -288,7 +286,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                 uint64_t *shistogram = &s->shistogram[(s->dmode == SINGLE ? 0: c) * w];
                 const float *src2 = (const float *)s->in[s->first]->extended_data[c];
 
-                for (n = 0; n < in->nb_samples; n++) {
+                for (n = 0; n < nb_samples; n++) {
                     bin = s->get_bin(src2[n], w);
 
                     shistogram[bin]++;
@@ -352,10 +350,15 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             h = aa * (H - 1);
 
             if (s->dmode == SINGLE) {
+                int start = H - h, end = H;
+                const int linesizey = s->out->linesize[0];
+                const int linesizea = s->out->linesize[3];
+                uint8_t *dsty = s->out->data[0] + start * linesizey;
+                uint8_t *dsta = s->out->data[3] + start * linesizea;
 
-                for (y = H - h; y < H; y++) {
-                    s->out->data[0][y * s->out->linesize[0] + n] = 255;
-                    s->out->data[3][y * s->out->linesize[0] + n] = 255;
+                for (y = start; y < end; y++, dsty += linesizey, dsta += linesizea) {
+                    dsty[n] = 255;
+                    dsta[n] = 255;
                 }
 
                 if (s->h - H > 0) {
@@ -367,18 +370,32 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                     s->out->data[3][s->ypos * s->out->linesize[3] + n] = 255;
                 }
             } else if (s->dmode == SEPARATE) {
+                int start = H - h, end = H;
                 float *out = &s->combine_buffer[3 * n];
+                const int linesizey = s->out->linesize[0];
+                const int linesizeu = s->out->linesize[1];
+                const int linesizev = s->out->linesize[2];
+                const int linesizea = s->out->linesize[3];
+                uint8_t *dsty = s->out->data[0] + start * linesizey;
+                uint8_t *dstu = s->out->data[1] + start * linesizeu;
+                uint8_t *dstv = s->out->data[2] + start * linesizev;
+                uint8_t *dsta = s->out->data[3] + start * linesizea;
                 int old;
 
-                old = s->out->data[0][(H - h) * s->out->linesize[0] + n];
-                for (y = H - h; y < H; y++) {
-                    if (s->out->data[0][y * s->out->linesize[0] + n] != old)
+                old = dsty[n];
+                for (y = start; y < end; y++) {
+                    if (dsty[n] != old)
                         break;
-                    old = s->out->data[0][y * s->out->linesize[0] + n];
-                    s->out->data[0][y * s->out->linesize[0] + n] = av_clip_uint8(yf);
-                    s->out->data[1][y * s->out->linesize[1] + n] = av_clip_uint8(128.f+uf);
-                    s->out->data[2][y * s->out->linesize[2] + n] = av_clip_uint8(128.f+vf);
-                    s->out->data[3][y * s->out->linesize[3] + n] = 255;
+                    old = dsty[n];
+                    dsty[n] = av_clip_uint8(yf);
+                    dstu[n] = av_clip_uint8(128.f+uf);
+                    dstv[n] = av_clip_uint8(128.f+vf);
+                    dsta[n] = 255;
+
+                    dsty += linesizey;
+                    dstu += linesizeu;
+                    dstv += linesizev;
+                    dsta += linesizea;
                 }
 
                 out[0] += aa * yf;
@@ -477,14 +494,14 @@ static const AVFilterPad ahistogram_outputs[] = {
     },
 };
 
-const AVFilter ff_avf_ahistogram = {
-    .name          = "ahistogram",
-    .description   = NULL_IF_CONFIG_SMALL("Convert input audio to histogram video output."),
+const FFFilter ff_avf_ahistogram = {
+    .p.name        = "ahistogram",
+    .p.description = NULL_IF_CONFIG_SMALL("Convert input audio to histogram video output."),
+    .p.priv_class  = &ahistogram_class,
     .uninit        = uninit,
     .priv_size     = sizeof(AudioHistogramContext),
     .activate      = activate,
     FILTER_INPUTS(ahistogram_inputs),
     FILTER_OUTPUTS(ahistogram_outputs),
-    FILTER_QUERY_FUNC(query_formats),
-    .priv_class    = &ahistogram_class,
+    FILTER_QUERY_FUNC2(query_formats),
 };

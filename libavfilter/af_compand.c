@@ -30,11 +30,12 @@
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/ffmath.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/samplefmt.h"
 #include "audio.h"
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
 
 typedef struct ChanParam {
     double attack;
@@ -306,8 +307,6 @@ static int config_output(AVFilterLink *outlink)
     int nb_attacks, nb_decays, nb_points;
     int new_nb_items, num;
     int i;
-    int err;
-
 
     count_items(s->attacks, &nb_attacks);
     count_items(s->decays, &nb_decays);
@@ -495,25 +494,9 @@ static int config_output(AVFilterLink *outlink)
         return 0;
     }
 
-    s->delay_frame = av_frame_alloc();
-    if (!s->delay_frame) {
-        uninit(ctx);
+    s->delay_frame = ff_get_audio_buffer(outlink, s->delay_samples);
+    if (!s->delay_frame)
         return AVERROR(ENOMEM);
-    }
-
-    s->delay_frame->format         = outlink->format;
-    s->delay_frame->nb_samples     = s->delay_samples;
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-    s->delay_frame->channel_layout = outlink->channel_layout;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-    if ((err = av_channel_layout_copy(&s->delay_frame->ch_layout, &outlink->ch_layout)) < 0)
-        return err;
-
-    err = av_frame_get_buffer(s->delay_frame, 0);
-    if (err)
-        return err;
 
     s->compand = compand_delay;
     return 0;
@@ -559,12 +542,12 @@ static const AVFilterPad compand_outputs[] = {
 };
 
 
-const AVFilter ff_af_compand = {
-    .name           = "compand",
-    .description    = NULL_IF_CONFIG_SMALL(
+const FFFilter ff_af_compand = {
+    .p.name         = "compand",
+    .p.description  = NULL_IF_CONFIG_SMALL(
             "Compress or expand audio dynamic range."),
+    .p.priv_class   = &compand_class,
     .priv_size      = sizeof(CompandContext),
-    .priv_class     = &compand_class,
     .init           = init,
     .uninit         = uninit,
     FILTER_INPUTS(compand_inputs),

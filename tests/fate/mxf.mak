@@ -37,7 +37,7 @@ fate-mxf-probe-dv25: CMD = run $(PROBE_FORMAT_STREAMS_COMMAND) -i "$(SRC)"
 
 FATE_MXF_PROBE-$(call DEMDEC, MXF, PRORES PCM_S24LE) += fate-mxf-probe-applehdr10
 fate-mxf-probe-applehdr10: SRC = $(TARGET_SAMPLES)/mxf/Meridian-Apple_ProResProxy-HDR10.mxf
-fate-mxf-probe-applehdr10: CMD = run $(PROBE_FORMAT_STREAMS_COMMAND) -i "$(SRC)" | sed -e "s/yuv422p10../yuv422p10/"
+fate-mxf-probe-applehdr10: CMD = run $(PROBE_FORMAT_STREAMS_COMMAND) -i "$(SRC)"
 
 # Tests remuxing ProRes as well as writing mastering display metadata.
 FATE_MXF_FFMPEG_FFPROBE-$(call REMUX, MXF, PRORES_DECODER) += fate-mxf-remux-applehdr10

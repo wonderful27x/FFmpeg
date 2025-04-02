@@ -216,8 +216,8 @@ const FFCodec ff_xface_encoder = {
     CODEC_LONG_NAME("X-face image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_XFACE,
-    .p.capabilities = AV_CODEC_CAP_DR1,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_MONOWHITE, AV_PIX_FMT_NONE },
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    CODEC_PIXFMTS(AV_PIX_FMT_MONOWHITE),
     .priv_data_size = sizeof(XFaceContext),
     FF_CODEC_ENCODE_CB(xface_encode_frame),
 };

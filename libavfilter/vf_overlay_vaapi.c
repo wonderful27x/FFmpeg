@@ -17,16 +17,14 @@
  */
 #include <string.h>
 
-#include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 
 #include "avfilter.h"
+#include "filters.h"
 #include "framesync.h"
-#include "formats.h"
-#include "internal.h"
 #include "vaapi_vpp.h"
+#include "video.h"
 #include "libavutil/eval.h"
 
 enum var_name {
@@ -159,106 +157,6 @@ static int overlay_vaapi_build_filter_params(AVFilterContext *avctx)
     return 0;
 }
 
-static int overlay_vaapi_render_picture(AVFilterContext *avctx,
-                                        VAProcPipelineParameterBuffer *params,
-                                        VAProcPipelineParameterBuffer *subpic_params,
-                                        AVFrame *output_frame)
-{
-    VAAPIVPPContext *ctx   = avctx->priv;
-    VASurfaceID output_surface;
-    VABufferID params_id;
-    VABufferID subpic_params_id;
-    VAStatus vas;
-    int err = 0;
-
-    output_surface = (VASurfaceID)(uintptr_t)output_frame->data[3];
-
-    vas = vaBeginPicture(ctx->hwctx->display,
-                         ctx->va_context, output_surface);
-    if (vas != VA_STATUS_SUCCESS) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to attach new picture: "
-               "%d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        goto fail;
-    }
-
-    vas = vaCreateBuffer(ctx->hwctx->display, ctx->va_context,
-                         VAProcPipelineParameterBufferType,
-                         sizeof(*params), 1, params, &params_id);
-    if (vas != VA_STATUS_SUCCESS) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to create parameter buffer: "
-               "%d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        goto fail_after_begin;
-    }
-    av_log(avctx, AV_LOG_DEBUG, "Pipeline parameter buffer is %#x.\n",
-           params_id);
-
-
-    vas = vaRenderPicture(ctx->hwctx->display, ctx->va_context,
-                          &params_id, 1);
-    if (vas != VA_STATUS_SUCCESS) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to render parameter buffer: "
-               "%d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        goto fail_after_begin;
-    }
-
-    if (subpic_params) {
-        vas = vaCreateBuffer(ctx->hwctx->display, ctx->va_context,
-                             VAProcPipelineParameterBufferType,
-                             sizeof(*subpic_params), 1, subpic_params, &subpic_params_id);
-        if (vas != VA_STATUS_SUCCESS) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to create parameter buffer: "
-                   "%d (%s).\n", vas, vaErrorStr(vas));
-            err = AVERROR(EIO);
-            goto fail_after_begin;
-        }
-        av_log(avctx, AV_LOG_DEBUG, "Pipeline subpic parameter buffer is %#x.\n",
-               subpic_params_id);
-
-        vas = vaRenderPicture(ctx->hwctx->display, ctx->va_context,
-                              &subpic_params_id, 1);
-        if (vas != VA_STATUS_SUCCESS) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to render subpic parameter buffer: "
-                   "%d (%s).\n", vas, vaErrorStr(vas));
-            err = AVERROR(EIO);
-            goto fail_after_begin;
-        }
-    }
-
-    vas = vaEndPicture(ctx->hwctx->display, ctx->va_context);
-    if (vas != VA_STATUS_SUCCESS) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to start picture processing: "
-               "%d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        goto fail_after_render;
-    }
-
-    if (CONFIG_VAAPI_1 || ctx->hwctx->driver_quirks &
-        AV_VAAPI_DRIVER_QUIRK_RENDER_PARAM_BUFFERS) {
-        vas = vaDestroyBuffer(ctx->hwctx->display, params_id);
-        if (vas != VA_STATUS_SUCCESS) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to free parameter buffer: "
-                   "%d (%s).\n", vas, vaErrorStr(vas));
-            // And ignore.
-        }
-    }
-
-    return 0;
-
-    // We want to make sure that if vaBeginPicture has been called, we also
-    // call vaRenderPicture and vaEndPicture.  These calls may well fail or
-    // do something else nasty, but once we're in this failure case there
-    // isn't much else we can do.
-fail_after_begin:
-    vaRenderPicture(ctx->hwctx->display, ctx->va_context, &params_id, 1);
-fail_after_render:
-    vaEndPicture(ctx->hwctx->display, ctx->va_context);
-fail:
-    return err;
-}
-
 static int overlay_vaapi_blend(FFFrameSync *fs)
 {
     AVFilterContext    *avctx = fs->parent;
@@ -267,7 +165,7 @@ static int overlay_vaapi_blend(FFFrameSync *fs)
     VAAPIVPPContext *vpp_ctx  = avctx->priv;
     AVFrame *input_main, *input_overlay;
     AVFrame *output;
-    VAProcPipelineParameterBuffer params, subpic_params;
+    VAProcPipelineParameterBuffer params[2];
     VABlendState blend_state = { 0 }; /**< Blend State */
     VARectangle overlay_region, output_region;
     int err;
@@ -296,7 +194,7 @@ static int overlay_vaapi_blend(FFFrameSync *fs)
     if (err < 0)
         goto fail;
 
-    err = ff_vaapi_vpp_init_params(avctx, &params,
+    err = ff_vaapi_vpp_init_params(avctx, &params[0],
                                    input_main, output);
     if (err < 0)
         goto fail;
@@ -308,11 +206,8 @@ static int overlay_vaapi_blend(FFFrameSync *fs)
         .height = output->height,
     };
 
-    params.filters     = &vpp_ctx->filter_buffers[0];
-    params.num_filters = vpp_ctx->nb_filter_buffers;
-
-    params.output_region = &output_region;
-    params.output_background_color = VAAPI_VPP_BACKGROUND_BLACK;
+    params[0].output_region = &output_region;
+    params[0].output_background_color = VAAPI_VPP_BACKGROUND_BLACK;
 
     if (input_overlay) {
         av_log(avctx, AV_LOG_DEBUG, "Filter overlay: %s, %ux%u (%"PRId64").\n",
@@ -333,17 +228,18 @@ static int overlay_vaapi_blend(FFFrameSync *fs)
                    "will crop the overlay image according based on the main image.\n");
         }
 
-        memcpy(&subpic_params, &params, sizeof(subpic_params));
+        memcpy(&params[1], &params[0], sizeof(params[0]));
 
         blend_state.flags         = ctx->blend_flags;
         blend_state.global_alpha  = ctx->blend_alpha;
-        subpic_params.blend_state = &blend_state;
+        params[1].blend_state = &blend_state;
 
-        subpic_params.surface       = (VASurfaceID)(uintptr_t)input_overlay->data[3];
-        subpic_params.output_region = &overlay_region;
+        params[1].surface       = (VASurfaceID)(uintptr_t)input_overlay->data[3];
+        params[1].surface_region = NULL;
+        params[1].output_region = &overlay_region;
     }
 
-    err = overlay_vaapi_render_picture(avctx, &params, input_overlay ? &subpic_params : NULL, output);
+    err = ff_vaapi_vpp_render_pictures(avctx, params, input_overlay ? 2 : 1, output);
     if (err < 0)
         goto fail;
 
@@ -360,12 +256,13 @@ fail:
 
 static int have_alpha_planar(AVFilterLink *link)
 {
+    FilterLink              *l = ff_filter_link(link);
     enum AVPixelFormat pix_fmt = link->format;
     const AVPixFmtDescriptor *desc;
     AVHWFramesContext *fctx;
 
     if (link->format == AV_PIX_FMT_VAAPI) {
-        fctx    = (AVHWFramesContext *)link->hw_frames_ctx->data;
+        fctx    = (AVHWFramesContext *)l->hw_frames_ctx->data;
         pix_fmt = fctx->sw_format;
     }
 
@@ -485,10 +382,10 @@ static const AVOption overlay_vaapi_options[] = {
     { "alpha", "Overlay global alpha", OFFSET(alpha),  AV_OPT_TYPE_FLOAT,  { .dbl = 1.0 }, 0.0, 1.0,      .flags = FLAGS },
     { "eof_action", "Action to take when encountering EOF from secondary input ",
         OFFSET(fs.opt_eof_action), AV_OPT_TYPE_INT, { .i64 = EOF_ACTION_REPEAT },
-        EOF_ACTION_REPEAT, EOF_ACTION_PASS, .flags = FLAGS, "eof_action" },
-        { "repeat", "Repeat the previous frame.",   0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_REPEAT }, .flags = FLAGS, "eof_action" },
-        { "endall", "End both streams.",            0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_ENDALL }, .flags = FLAGS, "eof_action" },
-        { "pass",   "Pass through the main input.", 0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_PASS },   .flags = FLAGS, "eof_action" },
+        EOF_ACTION_REPEAT, EOF_ACTION_PASS, .flags = FLAGS, .unit = "eof_action" },
+        { "repeat", "Repeat the previous frame.",   0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_REPEAT }, .flags = FLAGS, .unit = "eof_action" },
+        { "endall", "End both streams.",            0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_ENDALL }, .flags = FLAGS, .unit = "eof_action" },
+        { "pass",   "Pass through the main input.", 0, AV_OPT_TYPE_CONST, { .i64 = EOF_ACTION_PASS },   .flags = FLAGS, .unit = "eof_action" },
     { "shortest", "force termination when the shortest input terminates", OFFSET(fs.opt_shortest),   AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS },
     { "repeatlast", "repeat overlay of the last overlay frame",           OFFSET(fs.opt_repeatlast), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, FLAGS },
     { NULL },
@@ -517,11 +414,11 @@ static const AVFilterPad overlay_vaapi_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_overlay_vaapi = {
-    .name            = "overlay_vaapi",
-    .description     = NULL_IF_CONFIG_SMALL("Overlay one video on top of another"),
+const FFFilter ff_vf_overlay_vaapi = {
+    .p.name          = "overlay_vaapi",
+    .p.description   = NULL_IF_CONFIG_SMALL("Overlay one video on top of another"),
+    .p.priv_class    = &overlay_vaapi_class,
     .priv_size       = sizeof(OverlayVAAPIContext),
-    .priv_class      = &overlay_vaapi_class,
     .init            = &overlay_vaapi_init,
     .uninit          = &overlay_vaapi_uninit,
     .activate        = &overlay_vaapi_activate,

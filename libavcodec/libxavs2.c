@@ -96,8 +96,8 @@ static av_cold int xavs2_init(AVCodecContext *avctx)
     xavs2_opt_set2("OpenGOP",  "%d", !(avctx->flags & AV_CODEC_FLAG_CLOSED_GOP));
 
     {
-        AVDictionaryEntry *en = NULL;
-        while ((en = av_dict_get(cae->xavs2_opts, "", en, AV_DICT_IGNORE_SUFFIX)))
+        const AVDictionaryEntry *en = NULL;
+        while ((en = av_dict_iterate(cae->xavs2_opts, en)))
             xavs2_opt_set2(en->key, "%s", en->value);
     }
 
@@ -299,8 +299,8 @@ const FFCodec ff_libxavs2_encoder = {
     .close          = xavs2_close,
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
                       FF_CODEC_CAP_AUTO_THREADS,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
-                                                     AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
+    .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &libxavs2,
     .defaults       = xavs2_defaults,
     .p.wrapper_name = "libxavs2",

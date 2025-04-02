@@ -64,9 +64,6 @@ static int zero12v_decode_frame(AVCodecContext *avctx, AVFrame *pic,
     if ((ret = ff_get_buffer(avctx, pic, 0)) < 0)
         return ret;
 
-    pic->pict_type = AV_PICTURE_TYPE_I;
-    pic->key_frame = 1;
-
     line_end = avpkt->data + stride;
     for (line = 0; line < avctx->height; line++) {
         uint16_t y_temp[6] = {0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000};
@@ -131,8 +128,8 @@ static int zero12v_decode_frame(AVCodecContext *avctx, AVFrame *pic,
             u = x/2 + (uint16_t *)(pic->data[1] + line * pic->linesize[1]);
             v = x/2 + (uint16_t *)(pic->data[2] + line * pic->linesize[2]);
             memcpy(y, y_temp, sizeof(*y) * (width - x));
-            memcpy(u, u_temp, sizeof(*u) * (width - x + 1) / 2);
-            memcpy(v, v_temp, sizeof(*v) * (width - x + 1) / 2);
+            memcpy(u, u_temp, sizeof(*u) * ((width - x + 1) / 2));
+            memcpy(v, v_temp, sizeof(*v) * ((width - x + 1) / 2));
         }
 
         line_end += stride;

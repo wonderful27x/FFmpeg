@@ -251,7 +251,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
     }
 
     memcpy(frame->data[1], c->pal, AVPALETTE_SIZE);
-    frame->palette_has_changed = type & BMV_PALETTE;
 
     outptr = frame->data[0];
     srcptr = c->frame;

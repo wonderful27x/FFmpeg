@@ -25,7 +25,7 @@
 #include "libavutil/pixdesc.h"
 
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
 #include "opencl.h"
 #include "opencl_source.h"
 #include "video.h"
@@ -98,7 +98,7 @@ static int nlmeans_opencl_init(AVFilterContext *avctx, int width, int height)
     if (!ctx->patch_size_uv)
         ctx->patch_size_uv = ctx->patch_size;
 
-    err = ff_opencl_filter_load_program(avctx, &ff_opencl_source_nlmeans, 1);
+    err = ff_opencl_filter_load_program(avctx, &ff_source_nlmeans_cl, 1);
     if (err < 0)
         goto fail;
 
@@ -427,11 +427,12 @@ static const AVFilterPad nlmeans_opencl_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_nlmeans_opencl = {
-    .name           = "nlmeans_opencl",
-    .description    = NULL_IF_CONFIG_SMALL("Non-local means denoiser through OpenCL"),
+const FFFilter ff_vf_nlmeans_opencl = {
+    .p.name         = "nlmeans_opencl",
+    .p.description  = NULL_IF_CONFIG_SMALL("Non-local means denoiser through OpenCL"),
+    .p.priv_class   = &nlmeans_opencl_class,
+    .p.flags        = AVFILTER_FLAG_HWDEVICE,
     .priv_size      = sizeof(NLMeansOpenCLContext),
-    .priv_class     = &nlmeans_opencl_class,
     .init           = &ff_opencl_filter_init,
     .uninit         = &nlmeans_opencl_uninit,
     FILTER_INPUTS(nlmeans_opencl_inputs),

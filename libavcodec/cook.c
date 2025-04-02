@@ -44,6 +44,7 @@
 
 #include "libavutil/channel_layout.h"
 #include "libavutil/lfg.h"
+#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/thread.h"
 #include "libavutil/tx.h"
@@ -208,7 +209,7 @@ static av_cold int build_vlc(VLC *vlc, int nb_bits, const uint8_t counts[16],
         for (unsigned count = num + counts[i]; num < count; num++)
             lens[num] = i + 1;
 
-    return ff_init_vlc_from_lengths(vlc, nb_bits, num, lens, 1,
+    return ff_vlc_init_from_lengths(vlc, nb_bits, num, lens, 1,
                                     syms, symbol_size, symbol_size,
                                     offset, 0, logctx);
 }
@@ -341,11 +342,11 @@ static av_cold int cook_decode_close(AVCodecContext *avctx)
 
     /* Free the VLC tables. */
     for (i = 0; i < 13; i++)
-        ff_free_vlc(&q->envelope_quant_index[i]);
+        ff_vlc_free(&q->envelope_quant_index[i]);
     for (i = 0; i < 7; i++)
-        ff_free_vlc(&q->sqvh[i]);
+        ff_vlc_free(&q->sqvh[i]);
     for (i = 0; i < q->num_subpackets; i++)
-        ff_free_vlc(&q->subpacket[i].channel_coupling);
+        ff_vlc_free(&q->subpacket[i].channel_coupling);
 
     av_log(avctx, AV_LOG_DEBUG, "Memory deallocated.\n");
 
@@ -1307,7 +1308,6 @@ const FFCodec ff_cook_decoder = {
     .close          = cook_decode_close,
     FF_CODEC_DECODE_CB(cook_decode_frame),
     .p.capabilities = AV_CODEC_CAP_DR1,
-    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
-                                                      AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_FLTP),
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

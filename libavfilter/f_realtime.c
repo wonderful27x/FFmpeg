@@ -22,8 +22,10 @@
 
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
+#include "audio.h"
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
+#include "video.h"
 #include <float.h>
 
 typedef struct RealtimeContext {
@@ -85,21 +87,14 @@ static const AVFilterPad avfilter_vf_realtime_inputs[] = {
     },
 };
 
-static const AVFilterPad avfilter_vf_realtime_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
-const AVFilter ff_vf_realtime = {
-    .name        = "realtime",
-    .description = NULL_IF_CONFIG_SMALL("Slow down filtering to match realtime."),
+const FFFilter ff_vf_realtime = {
+    .p.name        = "realtime",
+    .p.description = NULL_IF_CONFIG_SMALL("Slow down filtering to match realtime."),
+    .p.priv_class  = &realtime_class,
+    .p.flags       = AVFILTER_FLAG_METADATA_ONLY,
     .priv_size   = sizeof(RealtimeContext),
-    .priv_class  = &realtime_class,
-    .flags       = AVFILTER_FLAG_METADATA_ONLY,
     FILTER_INPUTS(avfilter_vf_realtime_inputs),
-    FILTER_OUTPUTS(avfilter_vf_realtime_outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     .process_command = ff_filter_process_command,
 };
 #endif /* CONFIG_REALTIME_FILTER */
@@ -114,21 +109,14 @@ static const AVFilterPad arealtime_inputs[] = {
     },
 };
 
-static const AVFilterPad arealtime_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO,
-    },
-};
-
-const AVFilter ff_af_arealtime = {
-    .name        = "arealtime",
-    .description = NULL_IF_CONFIG_SMALL("Slow down filtering to match realtime."),
-    .priv_class  = &realtime_class,
+const FFFilter ff_af_arealtime = {
+    .p.name        = "arealtime",
+    .p.description = NULL_IF_CONFIG_SMALL("Slow down filtering to match realtime."),
+    .p.priv_class  = &realtime_class,
+    .p.flags       = AVFILTER_FLAG_METADATA_ONLY,
     .priv_size   = sizeof(RealtimeContext),
-    .flags       = AVFILTER_FLAG_METADATA_ONLY,
     FILTER_INPUTS(arealtime_inputs),
-    FILTER_OUTPUTS(arealtime_outputs),
+    FILTER_OUTPUTS(ff_audio_default_filterpad),
     .process_command = ff_filter_process_command,
 };
 #endif /* CONFIG_AREALTIME_FILTER */

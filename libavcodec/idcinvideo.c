@@ -224,7 +224,7 @@ static int idcin_decode_frame(AVCodecContext *avctx, AVFrame *frame,
     if (idcin_decode_vlcs(s, frame))
         return AVERROR_INVALIDDATA;
 
-    frame->palette_has_changed = ff_copy_palette(s->pal, avpkt, avctx);
+    ff_copy_palette(s->pal, avpkt, avctx);
     /* make the palette available on the way out */
     memcpy(frame->data[1], s->pal, AVPALETTE_SIZE);
 

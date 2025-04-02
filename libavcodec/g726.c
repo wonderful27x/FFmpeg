@@ -302,7 +302,7 @@ static int16_t g726_encode(G726Context* c, int16_t sig)
 {
     uint8_t i;
 
-    i = av_mod_uintp2(quant(c, sig/4 - c->se), c->code_size);
+    i = av_zero_extend(quant(c, sig/4 - c->se), c->code_size);
     g726_decode(c, i);
     return i;
 }
@@ -405,12 +405,12 @@ const FFCodec ff_adpcm_g726_encoder = {
     CODEC_LONG_NAME("G.726 ADPCM"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_ADPCM_G726,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(G726Context),
     .init           = g726_encode_init,
     FF_CODEC_ENCODE_CB(g726_encode_frame),
-    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
-                                                     AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
     .p.priv_class   = &g726_class,
     .defaults       = defaults,
 };
@@ -422,12 +422,12 @@ const FFCodec ff_adpcm_g726le_encoder = {
     CODEC_LONG_NAME("G.726 little endian ADPCM (\"right-justified\")"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_ADPCM_G726LE,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(G726Context),
     .init           = g726_encode_init,
     FF_CODEC_ENCODE_CB(g726_encode_frame),
-    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
-                                                     AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
     .p.priv_class   = &g726_class,
     .defaults       = defaults,
 };

@@ -95,8 +95,7 @@ static int msrle_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
         return ret;
 
     if (avctx->bits_per_coded_sample > 1 && avctx->bits_per_coded_sample <= 8) {
-        s->frame->palette_has_changed = ff_copy_palette(s->pal, avpkt, avctx);
-
+        ff_copy_palette(s->pal, avpkt, avctx);
         /* make the palette available */
         memcpy(s->frame->data[1], s->pal, AVPALETTE_SIZE);
     }

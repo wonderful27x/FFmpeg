@@ -35,7 +35,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
 
     avctx->bits_per_coded_sample = 32;
     if (avctx->width > 0)
-        avctx->bit_rate = ff_guess_coded_bitrate(avctx) * aligned_width / avctx->width;
+        avctx->bit_rate = av_rescale(ff_guess_coded_bitrate(avctx), aligned_width, avctx->width);
 
     return 0;
 }
@@ -96,10 +96,10 @@ const FFCodec ff_r210_encoder = {
     CODEC_LONG_NAME("Uncompressed RGB 10-bit"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_R210,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .init           = encode_init,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .p.pix_fmts     = pix_fmt,
+    CODEC_PIXFMTS_ARRAY(pix_fmt),
 };
 #endif
 #if CONFIG_R10K_ENCODER
@@ -108,10 +108,10 @@ const FFCodec ff_r10k_encoder = {
     CODEC_LONG_NAME("AJA Kona 10-bit RGB Codec"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_R10K,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .init           = encode_init,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .p.pix_fmts     = pix_fmt,
+    CODEC_PIXFMTS_ARRAY(pix_fmt),
 };
 #endif
 #if CONFIG_AVRP_ENCODER
@@ -120,9 +120,9 @@ const FFCodec ff_avrp_encoder = {
     CODEC_LONG_NAME("Avid 1:1 10-bit RGB Packer"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_AVRP,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .init           = encode_init,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .p.pix_fmts     = pix_fmt,
+    CODEC_PIXFMTS_ARRAY(pix_fmt),
 };
 #endif

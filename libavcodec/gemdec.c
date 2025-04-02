@@ -24,6 +24,7 @@
  * GEM Raster image decoder
  */
 
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
@@ -180,8 +181,7 @@ static int gem_decode_frame(AVCodecContext *avctx, AVFrame *p,
         return ret;
 
     p->pict_type = AV_PICTURE_TYPE_I;
-    p->key_frame = 1;
-    p->palette_has_changed = 1;
+    p->flags |= AV_FRAME_FLAG_KEY;
     palette = (uint32_t  *)p->data[1];
 
     if (tag == AV_RB32("STTT")) {

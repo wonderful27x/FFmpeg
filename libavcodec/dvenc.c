@@ -29,6 +29,7 @@
 #include "config.h"
 
 #include "libavutil/attributes.h"
+#include "libavutil/emms.h"
 #include "libavutil/internal.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
@@ -69,7 +70,6 @@ static av_cold int dvvideo_encode_init(AVCodecContext *avctx)
 {
     DVEncContext *s = avctx->priv_data;
     FDCTDSPContext fdsp;
-    MECmpContext mecc;
     PixblockDSPContext pdsp;
     int ret;
 
@@ -92,23 +92,26 @@ static av_cold int dvvideo_encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
-    ret = ff_dv_init_dynamic_tables(s->work_chunks, s->sys);
-    if (ret < 0) {
-        av_log(avctx, AV_LOG_ERROR, "Error initializing work tables.\n");
-        return ret;
+    ff_dv_init_dynamic_tables(s->work_chunks, s->sys);
+
+    if (avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT) {
+        MECmpContext mecc;
+        me_cmp_func ildct_cmp[6];
+
+        ff_me_cmp_init(&mecc, avctx);
+        ret = ff_set_cmp(&mecc, ildct_cmp, avctx->ildct_cmp, 0);
+        if (ret < 0)
+            return ret;
+        if (!ildct_cmp[5])
+            return AVERROR(EINVAL);
+        s->ildct_cmp = ildct_cmp[5];
     }
 
     memset(&fdsp,0, sizeof(fdsp));
-    memset(&mecc,0, sizeof(mecc));
     memset(&pdsp,0, sizeof(pdsp));
     ff_fdctdsp_init(&fdsp, avctx);
-    ff_me_cmp_init(&mecc, avctx);
     ff_pixblockdsp_init(&pdsp, avctx);
-    ff_set_cmp(&mecc, mecc.ildct_cmp, avctx->ildct_cmp);
-
     s->get_pixels = pdsp.get_pixels;
-    s->ildct_cmp  = mecc.ildct_cmp[5];
-
     s->fdct[0]    = fdsp.fdct;
     s->fdct[1]    = fdsp.fdct248;
 
@@ -216,7 +219,7 @@ static av_always_inline PutBitContext *dv_encode_ac(EncBlockInfo *bi,
             if (bits_left) {
                 size -= bits_left;
                 put_bits(pb, bits_left, vlc >> size);
-                vlc = av_mod_uintp2(vlc, size);
+                vlc = av_zero_extend(vlc, size);
             }
             if (pb + 1 >= pb_end) {
                 bi->partial_bit_count  = size;
@@ -1046,9 +1049,9 @@ static inline int dv_write_pack(enum DVPackType pack_id, DVEncContext *c,
     int fs;
 
     if (c->avctx->height >= 720)
-        fs = c->avctx->height == 720 || c->frame->top_field_first ? 0x40 : 0x00;
+        fs = c->avctx->height == 720 || (c->frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) ? 0x40 : 0x00;
     else
-        fs = c->frame->top_field_first ? 0x00 : 0x40;
+        fs = (c->frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) ? 0x00 : 0x40;
 
     if (DV_PROFILE_IS_HD(c->sys) ||
         (int)(av_q2d(c->avctx->sample_aspect_ratio) *
@@ -1144,7 +1147,7 @@ static void dv_format_frame(DVEncContext *c, uint8_t *buf)
 {
     int chan, i, j, k;
     /* We work with 720p frames split in half. The odd half-frame is chan 2,3 */
-    int chan_offset = 2*(c->sys->height == 720 && c->avctx->frame_number & 1);
+    int chan_offset = 2*(c->sys->height == 720 && c->avctx->frame_num & 1);
 
     for (chan = 0; chan < c->sys->n_difchan; chan++) {
         for (i = 0; i < c->sys->difseg_size; i++) {
@@ -1239,13 +1242,12 @@ const FFCodec ff_dvvideo_encoder = {
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_DVVIDEO,
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS |
-                      AV_CODEC_CAP_SLICE_THREADS,
+                      AV_CODEC_CAP_SLICE_THREADS                    |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(DVEncContext),
     .init           = dvvideo_encode_init,
     FF_CODEC_ENCODE_CB(dvvideo_encode_frame),
-    .p.pix_fmts     = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_YUV411P, AV_PIX_FMT_YUV422P,
-        AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV411P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV420P),
+    .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &dvvideo_encode_class,
 };

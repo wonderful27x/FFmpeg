@@ -73,12 +73,18 @@ struct FFAMediaFormat {
     int (*getFloat)(FFAMediaFormat* format, const char *name, float *out);
     int (*getBuffer)(FFAMediaFormat* format, const char *name, void** data, size_t *size);
     int (*getString)(FFAMediaFormat* format, const char *name, const char **out);
+    // NDK only, introduced in API level 28
+    int (*getRect)(FFAMediaFormat *, const char *name,
+                   int32_t *left, int32_t *top, int32_t *right, int32_t *bottom);
 
     void (*setInt32)(FFAMediaFormat* format, const char* name, int32_t value);
     void (*setInt64)(FFAMediaFormat* format, const char* name, int64_t value);
     void (*setFloat)(FFAMediaFormat* format, const char* name, float value);
     void (*setString)(FFAMediaFormat* format, const char* name, const char* value);
     void (*setBuffer)(FFAMediaFormat* format, const char* name, void* data, size_t size);
+    // NDK only, introduced in API level 28
+    void (*setRect)(FFAMediaFormat*, const char* name,
+                    int32_t left, int32_t top, int32_t right, int32_t bottom);
 };
 
 FFAMediaFormat *ff_AMediaFormat_new(int ndk);
@@ -118,6 +124,14 @@ static inline int ff_AMediaFormat_getString(FFAMediaFormat* format, const char *
     return format->getString(format, name, out);
 }
 
+static inline int ff_AMediaFormat_getRect(FFAMediaFormat *format, const char *name,
+                                          int32_t *left, int32_t *top, int32_t *right, int32_t *bottom)
+{
+    if (!format->getRect)
+        return AVERROR_EXTERNAL;
+    return format->getRect(format, name, left, top, right, bottom);
+}
+
 static inline void ff_AMediaFormat_setInt32(FFAMediaFormat* format, const char* name, int32_t value)
 {
     format->setInt32(format, name, value);
@@ -143,6 +157,16 @@ static inline void ff_AMediaFormat_setBuffer(FFAMediaFormat* format, const char*
     format->setBuffer(format, name, data, size);
 }
 
+static inline void ff_AMediaFormat_setRect(FFAMediaFormat* format, const char* name,
+                                           int32_t left, int32_t top, int32_t right, int32_t bottom)
+{
+    if (!format->setRect) {
+        av_log(format, AV_LOG_WARNING, "Doesn't support setRect\n");
+        return;
+    }
+    format->setRect(format, name, left, top, right, bottom);
+}
+
 typedef struct FFAMediaCodecCryptoInfo FFAMediaCodecCryptoInfo;
 
 struct FFAMediaCodecBufferInfo {
@@ -154,6 +178,22 @@ struct FFAMediaCodecBufferInfo {
 typedef struct FFAMediaCodecBufferInfo FFAMediaCodecBufferInfo;
 
 typedef struct FFAMediaCodec FFAMediaCodec;
+
+typedef struct FFAMediaCodecOnAsyncNotifyCallback {
+    void (*onAsyncInputAvailable)(FFAMediaCodec *codec, void *userdata,
+                                  int32_t index);
+
+    void (*onAsyncOutputAvailable)(FFAMediaCodec *codec, void *userdata,
+                                   int32_t index,
+                                   FFAMediaCodecBufferInfo *buffer_info);
+
+    void (*onAsyncFormatChanged)(FFAMediaCodec *codec, void *userdata,
+                                 FFAMediaFormat *format);
+
+    void (*onAsyncError)(FFAMediaCodec *codec, void *userdata, int error,
+                         const char *detail);
+} FFAMediaCodecOnAsyncNotifyCallback;
+
 struct FFAMediaCodec {
     const AVClass *class;
 
@@ -195,6 +235,11 @@ struct FFAMediaCodec {
 
     // For encoder with FFANativeWindow as input.
     int (*signalEndOfInputStream)(FFAMediaCodec *);
+
+    // Introduced in Android API 28
+    int (*setAsyncNotifyCallback)(FFAMediaCodec *codec,
+                                  const FFAMediaCodecOnAsyncNotifyCallback *callback,
+                                  void *userdata);
 };
 
 static inline char *ff_AMediaCodec_getName(FFAMediaCodec *codec)
@@ -319,6 +364,86 @@ static inline int ff_AMediaCodec_signalEndOfInputStream(FFAMediaCodec *codec)
     return codec->signalEndOfInputStream(codec);
 }
 
+static inline int ff_AMediaCodec_setAsyncNotifyCallback(FFAMediaCodec *codec,
+        const FFAMediaCodecOnAsyncNotifyCallback *callback,
+        void *userdata)
+{
+    return codec->setAsyncNotifyCallback(codec, callback, userdata);
+}
+
 int ff_Build_SDK_INT(AVCodecContext *avctx);
+
+enum FFAMediaFormatColorRange {
+    COLOR_RANGE_UNSPECIFIED = 0x0,
+    COLOR_RANGE_FULL        = 0x1,
+    COLOR_RANGE_LIMITED     = 0x2,
+};
+
+enum FFAMediaFormatColorStandard {
+    COLOR_STANDARD_UNSPECIFIED  = 0x0,
+    COLOR_STANDARD_BT709        = 0x1,
+    COLOR_STANDARD_BT601_PAL    = 0x2,
+    COLOR_STANDARD_BT601_NTSC   = 0x4,
+    COLOR_STANDARD_BT2020       = 0x6,
+};
+
+enum FFAMediaFormatColorTransfer {
+    COLOR_TRANSFER_UNSPECIFIED = 0x0,
+    COLOR_TRANSFER_LINEAR      = 0x1,
+    COLOR_TRANSFER_SDR_VIDEO   = 0x3,
+    COLOR_TRANSFER_ST2084      = 0x6,
+    COLOR_TRANSFER_HLG         = 0x7,
+};
+
+/**
+ * Map MediaFormat color range to AVColorRange.
+ *
+ * return AVCOL_RANGE_UNSPECIFIED when failed.
+ */
+enum AVColorRange ff_AMediaFormatColorRange_to_AVColorRange(int color_range);
+
+/**
+ * Map AVColorRange to MediaFormat color range.
+ *
+ * return COLOR_RANGE_UNSPECIFIED when failed.
+ */
+int ff_AMediaFormatColorRange_from_AVColorRange(enum AVColorRange color_range);
+
+/**
+ * Map MediaFormat color standard to AVColorSpace.
+ *
+ * return AVCOL_SPC_UNSPECIFIED when failed.
+ */
+enum AVColorSpace ff_AMediaFormatColorStandard_to_AVColorSpace(int color_standard);
+
+/**
+ * Map AVColorSpace to MediaFormat color standard.
+ *
+ * return COLOR_STANDARD_UNSPECIFIED when failed.
+ */
+int ff_AMediaFormatColorStandard_from_AVColorSpace(enum AVColorSpace color_space);
+
+/**
+ * Map MediaFormat color standard to AVColorPrimaries.
+ *
+ * return AVCOL_PRI_UNSPECIFIED when failed.
+ */
+enum AVColorPrimaries ff_AMediaFormatColorStandard_to_AVColorPrimaries(int color_standard);
+
+/**
+ * Map MediaFormat color transfer to AVColorTransferCharacteristic.
+ *
+ * return AVCOL_TRC_UNSPECIFIED when failed.
+ */
+enum AVColorTransferCharacteristic
+ff_AMediaFormatColorTransfer_to_AVColorTransfer(int color_transfer);
+
+/**
+ * Map AVColorTransferCharacteristic to MediaFormat color transfer.
+ *
+ * return COLOR_TRANSFER_UNSPECIFIED when failed.
+ */
+int ff_AMediaFormatColorTransfer_from_AVColorTransfer(
+    enum AVColorTransferCharacteristic color_transfer);
 
 #endif /* AVCODEC_MEDIACODEC_WRAPPER_H */

@@ -19,12 +19,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/tx.h"
 #include "audio.h"
 #include "avfilter.h"
 #include "filters.h"
-#include "internal.h"
 
 typedef struct AudioPsyClipContext {
     const AVClass *class;
@@ -556,6 +556,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     }
 
     s->in = in;
+    av_frame_copy_props(out, in);
     ff_filter_execute(ctx, psy_channels, out, NULL,
                       FFMIN(outlink->ch_layout.nb_channels, ff_filter_get_nb_threads(ctx)));
 
@@ -636,24 +637,17 @@ static const AVFilterPad inputs[] = {
     },
 };
 
-static const AVFilterPad outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO,
-    },
-};
-
-const AVFilter ff_af_apsyclip = {
-    .name            = "apsyclip",
-    .description     = NULL_IF_CONFIG_SMALL("Audio Psychoacoustic Clipper."),
+const FFFilter ff_af_apsyclip = {
+    .p.name          = "apsyclip",
+    .p.description   = NULL_IF_CONFIG_SMALL("Audio Psychoacoustic Clipper."),
+    .p.priv_class    = &apsyclip_class,
+    .p.flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |
+                       AVFILTER_FLAG_SLICE_THREADS,
     .priv_size       = sizeof(AudioPsyClipContext),
-    .priv_class      = &apsyclip_class,
     .uninit          = uninit,
     FILTER_INPUTS(inputs),
-    FILTER_OUTPUTS(outputs),
+    FILTER_OUTPUTS(ff_audio_default_filterpad),
     FILTER_SINGLE_SAMPLEFMT(AV_SAMPLE_FMT_FLTP),
-    .flags           = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |
-                       AVFILTER_FLAG_SLICE_THREADS,
     .activate        = activate,
     .process_command = ff_filter_process_command,
 };

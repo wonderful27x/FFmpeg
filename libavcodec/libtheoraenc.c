@@ -33,6 +33,7 @@
 /* FFmpeg includes */
 #include "libavutil/common.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/log.h"
 #include "libavutil/base64.h"
@@ -233,7 +234,7 @@ static av_cold int encode_init(AVCodecContext* avc_context)
         return AVERROR_EXTERNAL;
     }
 
-    h->keyframe_mask = (1 << t_info.keyframe_granule_shift) - 1;
+    h->keyframe_mask = (1 << av_ceil_log2(avc_context->gop_size)) - 1;
     /* Clear up theora_info struct */
     th_info_clear(&t_info);
 
@@ -346,7 +347,13 @@ static int encode_frame(AVCodecContext* avc_context, AVPacket *pkt,
 
     // HACK: assumes no encoder delay, this is true until libtheora becomes
     // multithreaded (which will be disabled unless explicitly requested)
-    pkt->pts = pkt->dts = frame->pts;
+    pkt->pts = frame->pts;
+    pkt->duration = frame->duration;
+
+    ret = ff_encode_reordered_opaque(avc_context, pkt, frame);
+    if (ret < 0)
+        return ret;
+
     if (!(o_packet.granulepos & h->keyframe_mask))
         pkt->flags |= AV_PKT_FLAG_KEY;
     *got_packet = 1;
@@ -373,14 +380,15 @@ const FFCodec ff_libtheora_encoder = {
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_THEORA,
     .p.capabilities = AV_CODEC_CAP_DR1 |
-                      AV_CODEC_CAP_DELAY /* for statsfile summary */,
+                      /* for statsfile summary */
+                      AV_CODEC_CAP_DELAY |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
     .priv_data_size = sizeof(TheoraContext),
     .init           = encode_init,
     .close          = encode_close,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .p.pix_fmts     = (const enum AVPixelFormat[]){
-        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P, AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P),
+    .color_ranges   = AVCOL_RANGE_MPEG,
     .p.wrapper_name = "libtheora",
 };

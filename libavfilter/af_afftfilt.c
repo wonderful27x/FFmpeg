@@ -19,7 +19,7 @@
  */
 
 #include "libavutil/avstring.h"
-#include "libavfilter/internal.h"
+#include "libavutil/mem.h"
 #include "libavutil/common.h"
 #include "libavutil/cpu.h"
 #include "libavutil/opt.h"
@@ -345,7 +345,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         goto fail;
     }
 
-    out->pts = in->pts;
+    av_frame_copy_props(out, in);
     out->nb_samples = in->nb_samples;
 
     for (ch = 0; ch < inlink->ch_layout.nb_channels; ch++) {
@@ -439,23 +439,16 @@ static const AVFilterPad inputs[] = {
     },
 };
 
-static const AVFilterPad outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO,
-    },
-};
-
-const AVFilter ff_af_afftfilt = {
-    .name            = "afftfilt",
-    .description     = NULL_IF_CONFIG_SMALL("Apply arbitrary expressions to samples in frequency domain."),
+const FFFilter ff_af_afftfilt = {
+    .p.name          = "afftfilt",
+    .p.description   = NULL_IF_CONFIG_SMALL("Apply arbitrary expressions to samples in frequency domain."),
+    .p.priv_class    = &afftfilt_class,
+    .p.flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |
+                       AVFILTER_FLAG_SLICE_THREADS,
     .priv_size       = sizeof(AFFTFiltContext),
-    .priv_class      = &afftfilt_class,
     FILTER_INPUTS(inputs),
-    FILTER_OUTPUTS(outputs),
+    FILTER_OUTPUTS(ff_audio_default_filterpad),
     FILTER_SINGLE_SAMPLEFMT(AV_SAMPLE_FMT_FLTP),
     .activate        = activate,
     .uninit          = uninit,
-    .flags           = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |
-                       AVFILTER_FLAG_SLICE_THREADS,
 };

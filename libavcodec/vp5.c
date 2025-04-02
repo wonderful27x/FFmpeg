@@ -44,10 +44,13 @@ static int vp5_parse_header(VP56Context *s, const uint8_t *buf, int buf_size)
     ret = ff_vpx_init_range_decoder(&s->c, buf, buf_size);
     if (ret < 0)
         return ret;
-    s->frames[VP56_FRAME_CURRENT]->key_frame = !vpx_rac_get(c);
+    if (!vpx_rac_get(c))
+        s->frames[VP56_FRAME_CURRENT]->flags |= AV_FRAME_FLAG_KEY;
+    else
+        s->frames[VP56_FRAME_CURRENT]->flags &= ~AV_FRAME_FLAG_KEY;
     vpx_rac_get(c);
     ff_vp56_init_dequant(s, vp56_rac_gets(c, 6));
-    if (s->frames[VP56_FRAME_CURRENT]->key_frame)
+    if (s->frames[VP56_FRAME_CURRENT]->flags & AV_FRAME_FLAG_KEY)
     {
         int render_x, render_y;
 
@@ -55,10 +58,7 @@ static int vp5_parse_header(VP56Context *s, const uint8_t *buf, int buf_size)
         if(vp56_rac_gets(c, 5) > 5)
             return AVERROR_INVALIDDATA;
         vp56_rac_gets(c, 2);
-        if (vpx_rac_get(c)) {
-            avpriv_report_missing_feature(s->avctx, "Interlacing");
-            return AVERROR_PATCHWELCOME;
-        }
+        s->interlaced = vp56_rac_gets(c, 1);
         rows = vp56_rac_gets(c, 8);  /* number of stored macroblock rows */
         cols = vp56_rac_gets(c, 8);  /* number of stored macroblock cols */
         if (!rows || !cols) {
@@ -148,7 +148,7 @@ static int vp5_parse_coeff_models(VP56Context *s)
             if (vpx_rac_get_prob_branchy(c, vp5_dccv_pct[pt][node])) {
                 def_prob[node] = vp56_rac_gets_nn(c, 7);
                 model->coeff_dccv[pt][node] = def_prob[node];
-            } else if (s->frames[VP56_FRAME_CURRENT]->key_frame) {
+            } else if (s->frames[VP56_FRAME_CURRENT]->flags & AV_FRAME_FLAG_KEY) {
                 model->coeff_dccv[pt][node] = def_prob[node];
             }
 
@@ -159,7 +159,7 @@ static int vp5_parse_coeff_models(VP56Context *s)
                     if (vpx_rac_get_prob_branchy(c, vp5_ract_pct[ct][pt][cg][node])) {
                         def_prob[node] = vp56_rac_gets_nn(c, 7);
                         model->coeff_ract[pt][ct][cg][node] = def_prob[node];
-                    } else if (s->frames[VP56_FRAME_CURRENT]->key_frame) {
+                    } else if (s->frames[VP56_FRAME_CURRENT]->flags & AV_FRAME_FLAG_KEY) {
                         model->coeff_ract[pt][ct][cg][node] = def_prob[node];
                     }
 

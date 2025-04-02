@@ -19,8 +19,7 @@
  */
 
 #include "libavutil/audio_fifo.h"
-#include "libavutil/internal.h"
-#include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
@@ -75,7 +74,10 @@ static av_cold int apac_init(AVCodecContext *avctx)
         avctx->sample_fmt = AV_SAMPLE_FMT_U8P;
 
     if (avctx->ch_layout.nb_channels < 1 ||
-        avctx->ch_layout.nb_channels > 2)
+        avctx->ch_layout.nb_channels > 2 ||
+        avctx->bits_per_coded_sample < 8 ||
+        avctx->bits_per_coded_sample > 16
+    )
         return AVERROR_INVALIDDATA;
 
     for (int ch = 0; ch < avctx->ch_layout.nb_channels; ch++) {
@@ -127,7 +129,7 @@ static int apac_decode(AVCodecContext *avctx, AVFrame *frame,
     APACContext *s = avctx->priv_data;
     GetBitContext *gb = &s->gb;
     int ret, n, buf_size, input_buf_size;
-    const uint8_t *buf;
+    uint8_t *buf;
     int nb_samples;
 
     if (!pkt->size && s->bitstream_size <= 0) {
@@ -157,6 +159,7 @@ static int apac_decode(AVCodecContext *avctx, AVFrame *frame,
     buf                = &s->bitstream[s->bitstream_index];
     buf_size          += s->bitstream_size;
     s->bitstream_size  = buf_size;
+    memset(buf + buf_size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
 
     frame->nb_samples = s->bitstream_size * 16 * 8;
     if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
@@ -196,15 +199,19 @@ static int apac_decode(AVCodecContext *avctx, AVFrame *frame,
                 return AVERROR_INVALIDDATA;
             }
 
-            if (get_bits_left(gb) < c->block_length * c->bit_length && pkt->size) {
-                c->have_code = 1;
-                s->cur_ch = ch;
-                goto end;
+            if (get_bits_left(gb) < c->block_length * c->bit_length) {
+                if (pkt->size) {
+                    c->have_code = 1;
+                    s->cur_ch = ch;
+                    goto end;
+                } else {
+                    break;
+                }
             }
 
             for (int i = 0; i < c->block_length; i++) {
                 int val = get_bits_long(gb, c->bit_length);
-                int delta = (val & 1) ? ~(val >> 1) : (val >> 1);
+                unsigned delta = (val & 1) ? ~(val >> 1) : (val >> 1);
                 int sample;
 
                 delta += c->last_delta;
@@ -262,10 +269,7 @@ const FFCodec ff_apac_decoder = {
     FF_CODEC_DECODE_CB(apac_decode),
     .close            = apac_close,
     .p.capabilities   = AV_CODEC_CAP_DELAY |
-                        AV_CODEC_CAP_DR1 |
-                        AV_CODEC_CAP_SUBFRAMES,
+                        AV_CODEC_CAP_DR1,
     .caps_internal    = FF_CODEC_CAP_INIT_CLEANUP,
-    .p.sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_U8P,
-                                                        AV_SAMPLE_FMT_S16P,
-                                                        AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_U8P, AV_SAMPLE_FMT_S16P),
 };

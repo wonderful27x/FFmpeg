@@ -24,6 +24,7 @@
  * Delphine Software International CIN video decoder
  */
 
+#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
@@ -293,7 +294,6 @@ static int cinvideo_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
         return res;
 
     memcpy(cin->frame->data[1], cin->palette, sizeof(cin->palette));
-    cin->frame->palette_has_changed = 1;
     for (y = 0; y < cin->avctx->height; ++y)
         memcpy(cin->frame->data[0] + (cin->avctx->height - 1 - y) * cin->frame->linesize[0],
                cin->bitmap_table[CIN_CUR_BMP] + y * cin->avctx->width,

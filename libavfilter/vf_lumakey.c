@@ -19,10 +19,9 @@
  */
 
 #include "libavutil/opt.h"
-#include "libavutil/imgutils.h"
+#include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "formats.h"
-#include "internal.h"
+#include "filters.h"
 #include "video.h"
 
 typedef struct LumakeyContext {
@@ -173,13 +172,6 @@ static const AVFilterPad lumakey_inputs[] = {
     },
 };
 
-static const AVFilterPad lumakey_outputs[] = {
-    {
-        .name          = "default",
-        .type          = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 #define OFFSET(x) offsetof(LumakeyContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
 
@@ -192,14 +184,15 @@ static const AVOption lumakey_options[] = {
 
 AVFILTER_DEFINE_CLASS(lumakey);
 
-const AVFilter ff_vf_lumakey = {
-    .name          = "lumakey",
-    .description   = NULL_IF_CONFIG_SMALL("Turns a certain luma into transparency."),
+const FFFilter ff_vf_lumakey = {
+    .p.name        = "lumakey",
+    .p.description = NULL_IF_CONFIG_SMALL("Turns a certain luma into transparency."),
+    .p.priv_class  = &lumakey_class,
+    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC |
+                     AVFILTER_FLAG_SLICE_THREADS,
     .priv_size     = sizeof(LumakeyContext),
-    .priv_class    = &lumakey_class,
     FILTER_INPUTS(lumakey_inputs),
-    FILTER_OUTPUTS(lumakey_outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_PIXFMTS_ARRAY(pixel_fmts),
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
     .process_command = process_command,
 };

@@ -271,16 +271,14 @@ const FFCodec ff_aptx_encoder = {
     CODEC_LONG_NAME("aptX (Audio Processing Technology for Bluetooth)"),
     .p.type                = AVMEDIA_TYPE_AUDIO,
     .p.id                  = AV_CODEC_ID_APTX,
-    .p.capabilities        = AV_CODEC_CAP_DR1,
+    .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size        = sizeof(AptXEncContext),
     .init                  = aptx_encode_init,
     FF_CODEC_ENCODE_CB(aptx_encode_frame),
     .close                 = aptx_close,
-    CODEC_OLD_CHANNEL_LAYOUTS(AV_CH_LAYOUT_STEREO)
-    .p.ch_layouts          = (const AVChannelLayout[]) { AV_CHANNEL_LAYOUT_STEREO, { 0 } },
-    .p.sample_fmts         = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S32P,
-                                                             AV_SAMPLE_FMT_NONE },
-    .p.supported_samplerates = (const int[]) {8000, 16000, 24000, 32000, 44100, 48000, 0},
+    CODEC_CH_LAYOUTS(AV_CHANNEL_LAYOUT_STEREO),
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S32P),
+    CODEC_SAMPLERATES(8000, 16000, 24000, 32000, 44100, 48000),
 };
 #endif
 
@@ -290,15 +288,13 @@ const FFCodec ff_aptx_hd_encoder = {
     CODEC_LONG_NAME("aptX HD (Audio Processing Technology for Bluetooth)"),
     .p.type                = AVMEDIA_TYPE_AUDIO,
     .p.id                  = AV_CODEC_ID_APTX_HD,
-    .p.capabilities        = AV_CODEC_CAP_DR1,
+    .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size        = sizeof(AptXEncContext),
     .init                  = aptx_encode_init,
     FF_CODEC_ENCODE_CB(aptx_encode_frame),
     .close                 = aptx_close,
-    CODEC_OLD_CHANNEL_LAYOUTS(AV_CH_LAYOUT_STEREO)
-    .p.ch_layouts          = (const AVChannelLayout[]) { AV_CHANNEL_LAYOUT_STEREO, { 0 } },
-    .p.sample_fmts         = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S32P,
-                                                             AV_SAMPLE_FMT_NONE },
-    .p.supported_samplerates = (const int[]) {8000, 16000, 24000, 32000, 44100, 48000, 0},
+    CODEC_CH_LAYOUTS(AV_CHANNEL_LAYOUT_STEREO),
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S32P),
+    CODEC_SAMPLERATES(8000, 16000, 24000, 32000, 44100, 48000),
 };
 #endif

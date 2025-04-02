@@ -31,6 +31,7 @@
 #include <float.h>
 #include <math.h>
 
+#include "libavutil/mem.h"
 #include "libavutil/tx.h"
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
@@ -40,10 +41,10 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/xga_font_data.h"
 #include "audio.h"
+#include "formats.h"
 #include "video.h"
 #include "avfilter.h"
 #include "filters.h"
-#include "internal.h"
 #include "window_func.h"
 
 enum DisplayMode  { COMBINED, SEPARATE, NB_MODES };
@@ -109,6 +110,7 @@ typedef struct ShowSpectrumContext {
     float dmin, dmax;
     uint64_t samples;
     int (*plot_channel)(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs);
+    int eof;
 
     float opacity_factor;
 
@@ -123,52 +125,52 @@ typedef struct ShowSpectrumContext {
 static const AVOption showspectrum_options[] = {
     { "size", "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str = "640x512"}, 0, 0, FLAGS },
     { "s",    "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str = "640x512"}, 0, 0, FLAGS },
-    { "slide", "set sliding mode", OFFSET(sliding), AV_OPT_TYPE_INT, {.i64 = 0}, 0, NB_SLIDES-1, FLAGS, "slide" },
-        { "replace", "replace old columns with new", 0, AV_OPT_TYPE_CONST, {.i64=REPLACE}, 0, 0, FLAGS, "slide" },
-        { "scroll", "scroll from right to left", 0, AV_OPT_TYPE_CONST, {.i64=SCROLL}, 0, 0, FLAGS, "slide" },
-        { "fullframe", "return full frames", 0, AV_OPT_TYPE_CONST, {.i64=FULLFRAME}, 0, 0, FLAGS, "slide" },
-        { "rscroll", "scroll from left to right", 0, AV_OPT_TYPE_CONST, {.i64=RSCROLL}, 0, 0, FLAGS, "slide" },
-        { "lreplace", "replace from right to left", 0, AV_OPT_TYPE_CONST, {.i64=LREPLACE}, 0, 0, FLAGS, "slide" },
-    { "mode", "set channel display mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=COMBINED}, COMBINED, NB_MODES-1, FLAGS, "mode" },
-        { "combined", "combined mode", 0, AV_OPT_TYPE_CONST, {.i64=COMBINED}, 0, 0, FLAGS, "mode" },
-        { "separate", "separate mode", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, "mode" },
-    { "color", "set channel coloring", OFFSET(color_mode), AV_OPT_TYPE_INT, {.i64=CHANNEL}, CHANNEL, NB_CLMODES-1, FLAGS, "color" },
-        { "channel",   "separate color for each channel", 0, AV_OPT_TYPE_CONST, {.i64=CHANNEL},   0, 0, FLAGS, "color" },
-        { "intensity", "intensity based coloring",        0, AV_OPT_TYPE_CONST, {.i64=INTENSITY}, 0, 0, FLAGS, "color" },
-        { "rainbow",   "rainbow based coloring",          0, AV_OPT_TYPE_CONST, {.i64=RAINBOW},   0, 0, FLAGS, "color" },
-        { "moreland",  "moreland based coloring",         0, AV_OPT_TYPE_CONST, {.i64=MORELAND},  0, 0, FLAGS, "color" },
-        { "nebulae",   "nebulae based coloring",          0, AV_OPT_TYPE_CONST, {.i64=NEBULAE},   0, 0, FLAGS, "color" },
-        { "fire",      "fire based coloring",             0, AV_OPT_TYPE_CONST, {.i64=FIRE},      0, 0, FLAGS, "color" },
-        { "fiery",     "fiery based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FIERY},     0, 0, FLAGS, "color" },
-        { "fruit",     "fruit based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FRUIT},     0, 0, FLAGS, "color" },
-        { "cool",      "cool based coloring",             0, AV_OPT_TYPE_CONST, {.i64=COOL},      0, 0, FLAGS, "color" },
-        { "magma",     "magma based coloring",            0, AV_OPT_TYPE_CONST, {.i64=MAGMA},     0, 0, FLAGS, "color" },
-        { "green",     "green based coloring",            0, AV_OPT_TYPE_CONST, {.i64=GREEN},     0, 0, FLAGS, "color" },
-        { "viridis",   "viridis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=VIRIDIS},   0, 0, FLAGS, "color" },
-        { "plasma",    "plasma based coloring",           0, AV_OPT_TYPE_CONST, {.i64=PLASMA},    0, 0, FLAGS, "color" },
-        { "cividis",   "cividis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=CIVIDIS},   0, 0, FLAGS, "color" },
-        { "terrain",   "terrain based coloring",          0, AV_OPT_TYPE_CONST, {.i64=TERRAIN},   0, 0, FLAGS, "color" },
-    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=SQRT}, LINEAR, NB_SCALES-1, FLAGS, "scale" },
-        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, "scale" },
-        { "sqrt", "square root", 0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, "scale" },
-        { "cbrt", "cubic root",  0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, "scale" },
-        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, "scale" },
-        { "4thrt","4th root",    0, AV_OPT_TYPE_CONST, {.i64=FOURTHRT}, 0, 0, FLAGS, "scale" },
-        { "5thrt","5th root",    0, AV_OPT_TYPE_CONST, {.i64=FIFTHRT},  0, 0, FLAGS, "scale" },
-    { "fscale", "set frequency scale", OFFSET(fscale), AV_OPT_TYPE_INT, {.i64=F_LINEAR}, 0, NB_FSCALES-1, FLAGS, "fscale" },
-        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=F_LINEAR}, 0, 0, FLAGS, "fscale" },
-        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=F_LOG},    0, 0, FLAGS, "fscale" },
+    { "slide", "set sliding mode", OFFSET(sliding), AV_OPT_TYPE_INT, {.i64 = 0}, 0, NB_SLIDES-1, FLAGS, .unit = "slide" },
+        { "replace", "replace old columns with new", 0, AV_OPT_TYPE_CONST, {.i64=REPLACE}, 0, 0, FLAGS, .unit = "slide" },
+        { "scroll", "scroll from right to left", 0, AV_OPT_TYPE_CONST, {.i64=SCROLL}, 0, 0, FLAGS, .unit = "slide" },
+        { "fullframe", "return full frames", 0, AV_OPT_TYPE_CONST, {.i64=FULLFRAME}, 0, 0, FLAGS, .unit = "slide" },
+        { "rscroll", "scroll from left to right", 0, AV_OPT_TYPE_CONST, {.i64=RSCROLL}, 0, 0, FLAGS, .unit = "slide" },
+        { "lreplace", "replace from right to left", 0, AV_OPT_TYPE_CONST, {.i64=LREPLACE}, 0, 0, FLAGS, .unit = "slide" },
+    { "mode", "set channel display mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=COMBINED}, COMBINED, NB_MODES-1, FLAGS, .unit = "mode" },
+        { "combined", "combined mode", 0, AV_OPT_TYPE_CONST, {.i64=COMBINED}, 0, 0, FLAGS, .unit = "mode" },
+        { "separate", "separate mode", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, .unit = "mode" },
+    { "color", "set channel coloring", OFFSET(color_mode), AV_OPT_TYPE_INT, {.i64=CHANNEL}, CHANNEL, NB_CLMODES-1, FLAGS, .unit = "color" },
+        { "channel",   "separate color for each channel", 0, AV_OPT_TYPE_CONST, {.i64=CHANNEL},   0, 0, FLAGS, .unit = "color" },
+        { "intensity", "intensity based coloring",        0, AV_OPT_TYPE_CONST, {.i64=INTENSITY}, 0, 0, FLAGS, .unit = "color" },
+        { "rainbow",   "rainbow based coloring",          0, AV_OPT_TYPE_CONST, {.i64=RAINBOW},   0, 0, FLAGS, .unit = "color" },
+        { "moreland",  "moreland based coloring",         0, AV_OPT_TYPE_CONST, {.i64=MORELAND},  0, 0, FLAGS, .unit = "color" },
+        { "nebulae",   "nebulae based coloring",          0, AV_OPT_TYPE_CONST, {.i64=NEBULAE},   0, 0, FLAGS, .unit = "color" },
+        { "fire",      "fire based coloring",             0, AV_OPT_TYPE_CONST, {.i64=FIRE},      0, 0, FLAGS, .unit = "color" },
+        { "fiery",     "fiery based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FIERY},     0, 0, FLAGS, .unit = "color" },
+        { "fruit",     "fruit based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FRUIT},     0, 0, FLAGS, .unit = "color" },
+        { "cool",      "cool based coloring",             0, AV_OPT_TYPE_CONST, {.i64=COOL},      0, 0, FLAGS, .unit = "color" },
+        { "magma",     "magma based coloring",            0, AV_OPT_TYPE_CONST, {.i64=MAGMA},     0, 0, FLAGS, .unit = "color" },
+        { "green",     "green based coloring",            0, AV_OPT_TYPE_CONST, {.i64=GREEN},     0, 0, FLAGS, .unit = "color" },
+        { "viridis",   "viridis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=VIRIDIS},   0, 0, FLAGS, .unit = "color" },
+        { "plasma",    "plasma based coloring",           0, AV_OPT_TYPE_CONST, {.i64=PLASMA},    0, 0, FLAGS, .unit = "color" },
+        { "cividis",   "cividis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=CIVIDIS},   0, 0, FLAGS, .unit = "color" },
+        { "terrain",   "terrain based coloring",          0, AV_OPT_TYPE_CONST, {.i64=TERRAIN},   0, 0, FLAGS, .unit = "color" },
+    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=SQRT}, LINEAR, NB_SCALES-1, FLAGS, .unit = "scale" },
+        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, .unit = "scale" },
+        { "sqrt", "square root", 0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, .unit = "scale" },
+        { "cbrt", "cubic root",  0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, .unit = "scale" },
+        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, .unit = "scale" },
+        { "4thrt","4th root",    0, AV_OPT_TYPE_CONST, {.i64=FOURTHRT}, 0, 0, FLAGS, .unit = "scale" },
+        { "5thrt","5th root",    0, AV_OPT_TYPE_CONST, {.i64=FIFTHRT},  0, 0, FLAGS, .unit = "scale" },
+    { "fscale", "set frequency scale", OFFSET(fscale), AV_OPT_TYPE_INT, {.i64=F_LINEAR}, 0, NB_FSCALES-1, FLAGS, .unit = "fscale" },
+        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=F_LINEAR}, 0, 0, FLAGS, .unit = "fscale" },
+        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=F_LOG},    0, 0, FLAGS, .unit = "fscale" },
     { "saturation", "color saturation multiplier", OFFSET(saturation), AV_OPT_TYPE_FLOAT, {.dbl = 1}, -10, 10, FLAGS },
     WIN_FUNC_OPTION("win_func", OFFSET(win_func), FLAGS, WFUNC_HANNING),
-    { "orientation", "set orientation", OFFSET(orientation), AV_OPT_TYPE_INT, {.i64=VERTICAL}, 0, NB_ORIENTATIONS-1, FLAGS, "orientation" },
-        { "vertical",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=VERTICAL},   0, 0, FLAGS, "orientation" },
-        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, {.i64=HORIZONTAL}, 0, 0, FLAGS, "orientation" },
+    { "orientation", "set orientation", OFFSET(orientation), AV_OPT_TYPE_INT, {.i64=VERTICAL}, 0, NB_ORIENTATIONS-1, FLAGS, .unit = "orientation" },
+        { "vertical",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=VERTICAL},   0, 0, FLAGS, .unit = "orientation" },
+        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, {.i64=HORIZONTAL}, 0, 0, FLAGS, .unit = "orientation" },
     { "overlap", "set window overlap", OFFSET(overlap), AV_OPT_TYPE_FLOAT, {.dbl = 0}, 0, 1, FLAGS },
     { "gain", "set scale gain", OFFSET(gain), AV_OPT_TYPE_FLOAT, {.dbl = 1}, 0, 128, FLAGS },
-    { "data", "set data mode", OFFSET(data), AV_OPT_TYPE_INT, {.i64 = 0}, 0, NB_DMODES-1, FLAGS, "data" },
-        { "magnitude", NULL, 0, AV_OPT_TYPE_CONST, {.i64=D_MAGNITUDE}, 0, 0, FLAGS, "data" },
-        { "phase",     NULL, 0, AV_OPT_TYPE_CONST, {.i64=D_PHASE},     0, 0, FLAGS, "data" },
-        { "uphase",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=D_UPHASE},    0, 0, FLAGS, "data" },
+    { "data", "set data mode", OFFSET(data), AV_OPT_TYPE_INT, {.i64 = 0}, 0, NB_DMODES-1, FLAGS, .unit = "data" },
+        { "magnitude", NULL, 0, AV_OPT_TYPE_CONST, {.i64=D_MAGNITUDE}, 0, 0, FLAGS, .unit = "data" },
+        { "phase",     NULL, 0, AV_OPT_TYPE_CONST, {.i64=D_PHASE},     0, 0, FLAGS, .unit = "data" },
+        { "uphase",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=D_UPHASE},    0, 0, FLAGS, .unit = "data" },
     { "rotation", "color rotation", OFFSET(rotation), AV_OPT_TYPE_FLOAT, {.dbl = 0}, -1, 1, FLAGS },
     { "start", "start frequency", OFFSET(start), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT32_MAX, FLAGS },
     { "stop",  "stop frequency",  OFFSET(stop),  AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT32_MAX, FLAGS },
@@ -356,32 +358,23 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_freep(&s->frames);
 }
 
-static int query_formats(AVFilterContext *ctx)
+static int query_formats(const AVFilterContext *ctx,
+                         AVFilterFormatsConfig **cfg_in,
+                         AVFilterFormatsConfig **cfg_out)
 {
     AVFilterFormats *formats = NULL;
-    AVFilterChannelLayouts *layouts = NULL;
-    AVFilterLink *inlink = ctx->inputs[0];
-    AVFilterLink *outlink = ctx->outputs[0];
     static const enum AVSampleFormat sample_fmts[] = { AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_NONE };
     static const enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVA444P, AV_PIX_FMT_NONE };
     int ret;
 
     /* set input audio formats */
     formats = ff_make_format_list(sample_fmts);
-    if ((ret = ff_formats_ref(formats, &inlink->outcfg.formats)) < 0)
-        return ret;
-
-    layouts = ff_all_channel_counts();
-    if ((ret = ff_channel_layouts_ref(layouts, &inlink->outcfg.channel_layouts)) < 0)
-        return ret;
-
-    formats = ff_all_samplerates();
-    if ((ret = ff_formats_ref(formats, &inlink->outcfg.samplerates)) < 0)
+    if ((ret = ff_formats_ref(formats, &cfg_in[0]->formats)) < 0)
         return ret;
 
     /* set output video format */
     formats = ff_make_format_list(pix_fmts);
-    if ((ret = ff_formats_ref(formats, &outlink->incfg.formats)) < 0)
+    if ((ret = ff_formats_ref(formats, &cfg_out[0]->formats)) < 0)
         return ret;
 
     return 0;
@@ -1058,6 +1051,7 @@ static int plot_channel_log(AVFilterContext *ctx, void *arg, int jobnr, int nb_j
 
 static int config_output(AVFilterLink *outlink)
 {
+    FilterLink *l = ff_filter_link(outlink);
     AVFilterContext *ctx = outlink->src;
     AVFilterLink *inlink = ctx->inputs[0];
     ShowSpectrumContext *s = ctx->priv;
@@ -1280,8 +1274,8 @@ static int config_output(AVFilterLink *outlink)
     } else {
         s->frame_rate = s->auto_frame_rate;
     }
-    outlink->frame_rate = s->frame_rate;
-    outlink->time_base = av_inv_q(outlink->frame_rate);
+    l->frame_rate = s->frame_rate;
+    outlink->time_base = av_inv_q(l->frame_rate);
 
     if (s->orientation == VERTICAL) {
         s->combine_buffer =
@@ -1292,6 +1286,8 @@ static int config_output(AVFilterLink *outlink)
             av_realloc_f(s->combine_buffer, s->w * 4,
                          sizeof(*s->combine_buffer));
     }
+    if (!s->combine_buffer)
+        return AVERROR(ENOMEM);
 
     av_log(ctx, AV_LOG_VERBOSE, "s:%dx%d FFT window size:%d\n",
            s->w, s->h, s->win_size);
@@ -1441,7 +1437,10 @@ static int plot_spectrum_column(AVFilterLink *inlink, AVFrame *insamples)
         }
     }
 
-    av_frame_make_writable(s->outpicref);
+    ret = ff_inlink_make_frame_writable(outlink, &s->outpicref);
+    if (ret < 0)
+        return ret;
+    outpicref = s->outpicref;
     /* copy to output */
     if (s->orientation == VERTICAL) {
         if (s->sliding == SCROLL) {
@@ -1538,8 +1537,7 @@ static int plot_spectrum_column(AVFilterLink *inlink, AVFrame *insamples)
 
     if (!s->single_pic && (s->sliding != FULLFRAME || s->xpos == 0)) {
         if (s->old_pts < outpicref->pts || s->sliding == FULLFRAME ||
-            (ff_outlink_get_status(inlink) == AVERROR_EOF &&
-             ff_inlink_queued_samples(inlink) <= s->hop_size)) {
+            (s->eof && ff_inlink_queued_samples(inlink) <= s->hop_size)) {
             AVFrame *clone;
 
             if (s->legend) {
@@ -1595,7 +1593,7 @@ static int activate(AVFilterContext *ctx)
 
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    if (s->outpicref) {
+    if (s->outpicref && ff_inlink_queued_samples(inlink) > 0) {
         AVFrame *fin;
 
         ret = ff_inlink_consume_samples(inlink, s->hop_size, s->hop_size, &fin);
@@ -1622,8 +1620,7 @@ static int activate(AVFilterContext *ctx)
         }
     }
 
-    if (ff_outlink_get_status(inlink) == AVERROR_EOF &&
-        s->sliding == FULLFRAME &&
+    if (s->eof && s->sliding == FULLFRAME &&
         s->xpos > 0 && s->outpicref) {
 
         if (s->orientation == VERTICAL) {
@@ -1651,11 +1648,15 @@ static int activate(AVFilterContext *ctx)
         return 0;
     }
 
-    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
-        if (status == AVERROR_EOF) {
-            ff_outlink_set_status(outlink, status, s->pts);
-            return 0;
-        }
+    if (!s->eof && ff_inlink_acknowledge_status(inlink, &status, &pts)) {
+        s->eof = status == AVERROR_EOF;
+        ff_filter_set_ready(ctx, 100);
+        return 0;
+    }
+
+    if (s->eof) {
+        ff_outlink_set_status(outlink, AVERROR_EOF, s->pts);
+        return 0;
     }
 
     if (ff_inlink_queued_samples(inlink) >= s->hop_size) {
@@ -1671,13 +1672,6 @@ static int activate(AVFilterContext *ctx)
     return FFERROR_NOT_READY;
 }
 
-static const AVFilterPad showspectrum_inputs[] = {
-    {
-        .name         = "default",
-        .type         = AVMEDIA_TYPE_AUDIO,
-    },
-};
-
 static const AVFilterPad showspectrum_outputs[] = {
     {
         .name          = "default",
@@ -1686,17 +1680,17 @@ static const AVFilterPad showspectrum_outputs[] = {
     },
 };
 
-const AVFilter ff_avf_showspectrum = {
-    .name          = "showspectrum",
-    .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output."),
+const FFFilter ff_avf_showspectrum = {
+    .p.name        = "showspectrum",
+    .p.description = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output."),
+    .p.priv_class  = &showspectrum_class,
+    .p.flags       = AVFILTER_FLAG_SLICE_THREADS,
     .uninit        = uninit,
     .priv_size     = sizeof(ShowSpectrumContext),
-    FILTER_INPUTS(showspectrum_inputs),
+    FILTER_INPUTS(ff_audio_default_filterpad),
     FILTER_OUTPUTS(showspectrum_outputs),
-    FILTER_QUERY_FUNC(query_formats),
+    FILTER_QUERY_FUNC2(query_formats),
     .activate      = activate,
-    .priv_class    = &showspectrum_class,
-    .flags         = AVFILTER_FLAG_SLICE_THREADS,
 };
 #endif // CONFIG_SHOWSPECTRUM_FILTER
 
@@ -1705,40 +1699,40 @@ const AVFilter ff_avf_showspectrum = {
 static const AVOption showspectrumpic_options[] = {
     { "size", "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str = "4096x2048"}, 0, 0, FLAGS },
     { "s",    "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str = "4096x2048"}, 0, 0, FLAGS },
-    { "mode", "set channel display mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=COMBINED}, 0, NB_MODES-1, FLAGS, "mode" },
-        { "combined", "combined mode", 0, AV_OPT_TYPE_CONST, {.i64=COMBINED}, 0, 0, FLAGS, "mode" },
-        { "separate", "separate mode", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, "mode" },
-    { "color", "set channel coloring", OFFSET(color_mode), AV_OPT_TYPE_INT, {.i64=INTENSITY}, 0, NB_CLMODES-1, FLAGS, "color" },
-        { "channel",   "separate color for each channel", 0, AV_OPT_TYPE_CONST, {.i64=CHANNEL},   0, 0, FLAGS, "color" },
-        { "intensity", "intensity based coloring",        0, AV_OPT_TYPE_CONST, {.i64=INTENSITY}, 0, 0, FLAGS, "color" },
-        { "rainbow",   "rainbow based coloring",          0, AV_OPT_TYPE_CONST, {.i64=RAINBOW},   0, 0, FLAGS, "color" },
-        { "moreland",  "moreland based coloring",         0, AV_OPT_TYPE_CONST, {.i64=MORELAND},  0, 0, FLAGS, "color" },
-        { "nebulae",   "nebulae based coloring",          0, AV_OPT_TYPE_CONST, {.i64=NEBULAE},   0, 0, FLAGS, "color" },
-        { "fire",      "fire based coloring",             0, AV_OPT_TYPE_CONST, {.i64=FIRE},      0, 0, FLAGS, "color" },
-        { "fiery",     "fiery based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FIERY},     0, 0, FLAGS, "color" },
-        { "fruit",     "fruit based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FRUIT},     0, 0, FLAGS, "color" },
-        { "cool",      "cool based coloring",             0, AV_OPT_TYPE_CONST, {.i64=COOL},      0, 0, FLAGS, "color" },
-        { "magma",     "magma based coloring",            0, AV_OPT_TYPE_CONST, {.i64=MAGMA},     0, 0, FLAGS, "color" },
-        { "green",     "green based coloring",            0, AV_OPT_TYPE_CONST, {.i64=GREEN},     0, 0, FLAGS, "color" },
-        { "viridis",   "viridis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=VIRIDIS},   0, 0, FLAGS, "color" },
-        { "plasma",    "plasma based coloring",           0, AV_OPT_TYPE_CONST, {.i64=PLASMA},    0, 0, FLAGS, "color" },
-        { "cividis",   "cividis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=CIVIDIS},   0, 0, FLAGS, "color" },
-        { "terrain",   "terrain based coloring",          0, AV_OPT_TYPE_CONST, {.i64=TERRAIN},   0, 0, FLAGS, "color" },
-    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=LOG}, 0, NB_SCALES-1, FLAGS, "scale" },
-        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, "scale" },
-        { "sqrt", "square root", 0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, "scale" },
-        { "cbrt", "cubic root",  0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, "scale" },
-        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, "scale" },
-        { "4thrt","4th root",    0, AV_OPT_TYPE_CONST, {.i64=FOURTHRT}, 0, 0, FLAGS, "scale" },
-        { "5thrt","5th root",    0, AV_OPT_TYPE_CONST, {.i64=FIFTHRT},  0, 0, FLAGS, "scale" },
-    { "fscale", "set frequency scale", OFFSET(fscale), AV_OPT_TYPE_INT, {.i64=F_LINEAR}, 0, NB_FSCALES-1, FLAGS, "fscale" },
-        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=F_LINEAR}, 0, 0, FLAGS, "fscale" },
-        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=F_LOG},    0, 0, FLAGS, "fscale" },
+    { "mode", "set channel display mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=COMBINED}, 0, NB_MODES-1, FLAGS, .unit = "mode" },
+        { "combined", "combined mode", 0, AV_OPT_TYPE_CONST, {.i64=COMBINED}, 0, 0, FLAGS, .unit = "mode" },
+        { "separate", "separate mode", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, .unit = "mode" },
+    { "color", "set channel coloring", OFFSET(color_mode), AV_OPT_TYPE_INT, {.i64=INTENSITY}, 0, NB_CLMODES-1, FLAGS, .unit = "color" },
+        { "channel",   "separate color for each channel", 0, AV_OPT_TYPE_CONST, {.i64=CHANNEL},   0, 0, FLAGS, .unit = "color" },
+        { "intensity", "intensity based coloring",        0, AV_OPT_TYPE_CONST, {.i64=INTENSITY}, 0, 0, FLAGS, .unit = "color" },
+        { "rainbow",   "rainbow based coloring",          0, AV_OPT_TYPE_CONST, {.i64=RAINBOW},   0, 0, FLAGS, .unit = "color" },
+        { "moreland",  "moreland based coloring",         0, AV_OPT_TYPE_CONST, {.i64=MORELAND},  0, 0, FLAGS, .unit = "color" },
+        { "nebulae",   "nebulae based coloring",          0, AV_OPT_TYPE_CONST, {.i64=NEBULAE},   0, 0, FLAGS, .unit = "color" },
+        { "fire",      "fire based coloring",             0, AV_OPT_TYPE_CONST, {.i64=FIRE},      0, 0, FLAGS, .unit = "color" },
+        { "fiery",     "fiery based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FIERY},     0, 0, FLAGS, .unit = "color" },
+        { "fruit",     "fruit based coloring",            0, AV_OPT_TYPE_CONST, {.i64=FRUIT},     0, 0, FLAGS, .unit = "color" },
+        { "cool",      "cool based coloring",             0, AV_OPT_TYPE_CONST, {.i64=COOL},      0, 0, FLAGS, .unit = "color" },
+        { "magma",     "magma based coloring",            0, AV_OPT_TYPE_CONST, {.i64=MAGMA},     0, 0, FLAGS, .unit = "color" },
+        { "green",     "green based coloring",            0, AV_OPT_TYPE_CONST, {.i64=GREEN},     0, 0, FLAGS, .unit = "color" },
+        { "viridis",   "viridis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=VIRIDIS},   0, 0, FLAGS, .unit = "color" },
+        { "plasma",    "plasma based coloring",           0, AV_OPT_TYPE_CONST, {.i64=PLASMA},    0, 0, FLAGS, .unit = "color" },
+        { "cividis",   "cividis based coloring",          0, AV_OPT_TYPE_CONST, {.i64=CIVIDIS},   0, 0, FLAGS, .unit = "color" },
+        { "terrain",   "terrain based coloring",          0, AV_OPT_TYPE_CONST, {.i64=TERRAIN},   0, 0, FLAGS, .unit = "color" },
+    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=LOG}, 0, NB_SCALES-1, FLAGS, .unit = "scale" },
+        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, .unit = "scale" },
+        { "sqrt", "square root", 0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, .unit = "scale" },
+        { "cbrt", "cubic root",  0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, .unit = "scale" },
+        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, .unit = "scale" },
+        { "4thrt","4th root",    0, AV_OPT_TYPE_CONST, {.i64=FOURTHRT}, 0, 0, FLAGS, .unit = "scale" },
+        { "5thrt","5th root",    0, AV_OPT_TYPE_CONST, {.i64=FIFTHRT},  0, 0, FLAGS, .unit = "scale" },
+    { "fscale", "set frequency scale", OFFSET(fscale), AV_OPT_TYPE_INT, {.i64=F_LINEAR}, 0, NB_FSCALES-1, FLAGS, .unit = "fscale" },
+        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=F_LINEAR}, 0, 0, FLAGS, .unit = "fscale" },
+        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=F_LOG},    0, 0, FLAGS, .unit = "fscale" },
     { "saturation", "color saturation multiplier", OFFSET(saturation), AV_OPT_TYPE_FLOAT, {.dbl = 1}, -10, 10, FLAGS },
     WIN_FUNC_OPTION("win_func", OFFSET(win_func), FLAGS, WFUNC_HANNING),
-    { "orientation", "set orientation", OFFSET(orientation), AV_OPT_TYPE_INT, {.i64=VERTICAL}, 0, NB_ORIENTATIONS-1, FLAGS, "orientation" },
-        { "vertical",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=VERTICAL},   0, 0, FLAGS, "orientation" },
-        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, {.i64=HORIZONTAL}, 0, 0, FLAGS, "orientation" },
+    { "orientation", "set orientation", OFFSET(orientation), AV_OPT_TYPE_INT, {.i64=VERTICAL}, 0, NB_ORIENTATIONS-1, FLAGS, .unit = "orientation" },
+        { "vertical",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=VERTICAL},   0, 0, FLAGS, .unit = "orientation" },
+        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, {.i64=HORIZONTAL}, 0, 0, FLAGS, .unit = "orientation" },
     { "gain", "set scale gain", OFFSET(gain), AV_OPT_TYPE_FLOAT, {.dbl = 1}, 0, 128, FLAGS },
     { "legend", "draw legend", OFFSET(legend), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, FLAGS },
     { "rotation", "color rotation", OFFSET(rotation), AV_OPT_TYPE_FLOAT, {.dbl = 0}, -1, 1, FLAGS },
@@ -1782,7 +1776,7 @@ static int showspectrumpic_request_frame(AVFilterLink *outlink)
             int acc_samples = 0;
             int dst_offset = 0;
 
-            while (nb_frame <= s->nb_frames) {
+            while (nb_frame < s->nb_frames) {
                 AVFrame *cur_frame = s->frames[nb_frame];
                 int cur_frame_samples = cur_frame->nb_samples;
                 int nb_samples = 0;
@@ -1873,16 +1867,16 @@ static const AVFilterPad showspectrumpic_outputs[] = {
     },
 };
 
-const AVFilter ff_avf_showspectrumpic = {
-    .name          = "showspectrumpic",
-    .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output single picture."),
+const FFFilter ff_avf_showspectrumpic = {
+    .p.name        = "showspectrumpic",
+    .p.description = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output single picture."),
+    .p.priv_class  = &showspectrumpic_class,
+    .p.flags       = AVFILTER_FLAG_SLICE_THREADS,
     .uninit        = uninit,
     .priv_size     = sizeof(ShowSpectrumContext),
     FILTER_INPUTS(showspectrumpic_inputs),
     FILTER_OUTPUTS(showspectrumpic_outputs),
-    FILTER_QUERY_FUNC(query_formats),
-    .priv_class    = &showspectrumpic_class,
-    .flags         = AVFILTER_FLAG_SLICE_THREADS,
+    FILTER_QUERY_FUNC2(query_formats),
 };
 
 #endif // CONFIG_SHOWSPECTRUMPIC_FILTER

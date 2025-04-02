@@ -26,6 +26,7 @@
 #include "encode.h"
 #include "put_bits.h"
 #include "libavutil/crc.h"
+#include "libavutil/mem.h"
 
 typedef struct TTAEncContext {
     const AVCRC *crc_table;
@@ -204,13 +205,11 @@ const FFCodec ff_tta_encoder = {
     CODEC_LONG_NAME("TTA (True Audio)"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_TTA,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(TTAEncContext),
     .init           = tta_encode_init,
     .close          = tta_encode_close,
     FF_CODEC_ENCODE_CB(tta_encode_frame),
-    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_U8,
-                                                     AV_SAMPLE_FMT_S16,
-                                                     AV_SAMPLE_FMT_S32,
-                                                     AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_U8, AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S32),
 };

@@ -22,7 +22,9 @@
 #include "avformat.h"
 #include "mpegts.h"
 #include "internal.h"
+#include "mux.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/opt.h"
 
@@ -77,6 +79,7 @@ static int is_supported(enum AVCodecID id)
     case AV_CODEC_ID_THEORA:
     case AV_CODEC_ID_VP8:
     case AV_CODEC_ID_VP9:
+    case AV_CODEC_ID_AV1:
     case AV_CODEC_ID_ADPCM_G722:
     case AV_CODEC_ID_ADPCM_G726:
     case AV_CODEC_ID_ADPCM_G726LE:
@@ -216,10 +219,28 @@ static int rtp_write_header(AVFormatContext *s1)
             s->nal_length_size = (st->codecpar->extradata[21] & 0x03) + 1;
         }
         break;
+    case AV_CODEC_ID_MJPEG:
+    case AV_CODEC_ID_BITPACKED:
+    case AV_CODEC_ID_RAWVIDEO:
+        if (st->codecpar->width <= 0 || st->codecpar->height <= 0) {
+            av_log(s1, AV_LOG_ERROR, "dimensions not set\n");
+            return AVERROR(EINVAL);
+        }
+        break;
     case AV_CODEC_ID_VP9:
         if (s1->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
             av_log(s, AV_LOG_ERROR,
                    "Packetizing VP9 is experimental and its specification is "
+                   "still in draft state. "
+                   "Please set -strict experimental in order to enable it.\n");
+            ret = AVERROR_EXPERIMENTAL;
+            goto fail;
+        }
+        break;
+    case AV_CODEC_ID_AV1:
+        if (s1->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
+            av_log(s, AV_LOG_ERROR,
+                   "Packetizing AV1 is experimental and its specification is "
                    "still in draft state. "
                    "Please set -strict experimental in order to enable it.\n");
             ret = AVERROR_EXPERIMENTAL;
@@ -577,6 +598,9 @@ static int rtp_write_packet(AVFormatContext *s1, AVPacket *pkt)
     case AV_CODEC_ID_AMR_WB:
         ff_rtp_send_amr(s1, pkt->data, size);
         break;
+    case AV_CODEC_ID_AV1:
+        ff_rtp_send_av1(s1, pkt->data, size, (pkt->flags & AV_PKT_FLAG_KEY) ? 1 : 0);
+        break;
     case AV_CODEC_ID_MPEG2TS:
         rtp_send_mpegts_raw(s1, pkt->data, size);
         break;
@@ -659,15 +683,15 @@ static int rtp_write_trailer(AVFormatContext *s1)
     return 0;
 }
 
-const AVOutputFormat ff_rtp_muxer = {
-    .name              = "rtp",
-    .long_name         = NULL_IF_CONFIG_SMALL("RTP output"),
+const FFOutputFormat ff_rtp_muxer = {
+    .p.name            = "rtp",
+    .p.long_name       = NULL_IF_CONFIG_SMALL("RTP output"),
     .priv_data_size    = sizeof(RTPMuxContext),
-    .audio_codec       = AV_CODEC_ID_PCM_MULAW,
-    .video_codec       = AV_CODEC_ID_MPEG4,
+    .p.audio_codec     = AV_CODEC_ID_PCM_MULAW,
+    .p.video_codec     = AV_CODEC_ID_MPEG4,
     .write_header      = rtp_write_header,
     .write_packet      = rtp_write_packet,
     .write_trailer     = rtp_write_trailer,
-    .priv_class        = &rtp_muxer_class,
-    .flags             = AVFMT_TS_NONSTRICT,
+    .p.priv_class      = &rtp_muxer_class,
+    .p.flags           = AVFMT_NODIMENSIONS | AVFMT_TS_NONSTRICT,
 };

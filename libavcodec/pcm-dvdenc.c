@@ -116,7 +116,7 @@ static int pcm_dvd_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 {
     PCMDVDContext *s = avctx->priv_data;
     int samples = frame->nb_samples * avctx->ch_layout.nb_channels;
-    int64_t pkt_size = (frame->nb_samples / s->samples_per_block) * s->block_size + 3;
+    int64_t pkt_size = (int64_t)(frame->nb_samples / s->samples_per_block) * s->block_size + 3;
     int blocks = (pkt_size - 3) / s->block_size;
     const int16_t *src16;
     const int32_t *src32;
@@ -176,19 +176,13 @@ const FFCodec ff_pcm_dvd_encoder = {
     CODEC_LONG_NAME("PCM signed 16|20|24-bit big-endian for DVD media"),
     .p.type         = AVMEDIA_TYPE_AUDIO,
     .p.id           = AV_CODEC_ID_PCM_DVD,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(PCMDVDContext),
     .init           = pcm_dvd_encode_init,
     FF_CODEC_ENCODE_CB(pcm_dvd_encode_frame),
-    .p.supported_samplerates = (const int[]) { 48000, 96000, 0},
-    CODEC_OLD_CHANNEL_LAYOUTS(AV_CH_LAYOUT_MONO, AV_CH_LAYOUT_STEREO,
-                              AV_CH_LAYOUT_5POINT1, AV_CH_LAYOUT_7POINT1)
-    .p.ch_layouts   = (const AVChannelLayout[]) { AV_CHANNEL_LAYOUT_MONO,
-                                                  AV_CHANNEL_LAYOUT_STEREO,
-                                                  AV_CHANNEL_LAYOUT_5POINT1,
-                                                  AV_CHANNEL_LAYOUT_7POINT1,
-                                                  { 0 } },
-    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
-                                                     AV_SAMPLE_FMT_S32,
-                                                     AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLERATES(48000, 96000),
+    CODEC_CH_LAYOUTS(AV_CHANNEL_LAYOUT_MONO,    AV_CHANNEL_LAYOUT_STEREO,
+                     AV_CHANNEL_LAYOUT_5POINT1, AV_CHANNEL_LAYOUT_7POINT1),
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_S32),
 };

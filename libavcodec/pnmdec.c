@@ -22,6 +22,7 @@
 #include "config_components.h"
 
 #include "libavutil/half2float.h"
+#include "libavutil/intfloat.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"
@@ -64,8 +65,6 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
 
     if ((ret = ff_get_buffer(avctx, p, 0)) < 0)
         return ret;
-    p->pict_type = AV_PICTURE_TYPE_I;
-    p->key_frame = 1;
     avctx->bits_per_raw_sample = av_log2(s->maxval) + 1;
 
     switch (avctx->pix_fmt) {
@@ -137,7 +136,7 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
         if(s->type < 4 || (is_mono && s->type==7)){
             for (i=0; i<avctx->height; i++) {
                 PutBitContext pb;
-                init_put_bits(&pb, ptr, linesize);
+                init_put_bits(&pb, ptr, FFABS(linesize));
                 for(j=0; j<avctx->width * components; j++){
                     unsigned int c=0;
                     unsigned v=0;
@@ -264,7 +263,7 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
         break;
     case AV_PIX_FMT_GBRPF32:
         if (!s->half) {
-            if (avctx->width * avctx->height * 12 > s->bytestream_end - s->bytestream)
+            if (avctx->width * avctx->height * 12LL > s->bytestream_end - s->bytestream)
                 return AVERROR_INVALIDDATA;
             scale = 1.f / s->scale;
             if (s->endian) {
@@ -346,6 +345,13 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
                 }
             }
         }
+        /* PFM is encoded from bottom to top */
+        p->data[0] += (avctx->height - 1) * p->linesize[0];
+        p->data[1] += (avctx->height - 1) * p->linesize[1];
+        p->data[2] += (avctx->height - 1) * p->linesize[2];
+        p->linesize[0] = -p->linesize[0];
+        p->linesize[1] = -p->linesize[1];
+        p->linesize[2] = -p->linesize[2];
         break;
     case AV_PIX_FMT_GRAYF32:
         if (!s->half) {
@@ -395,6 +401,9 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
                 }
             }
         }
+        /* PFM is encoded from bottom to top */
+        p->data[0] += (avctx->height - 1) * p->linesize[0];
+        p->linesize[0] = -p->linesize[0];
         break;
     }
     *got_frame = 1;

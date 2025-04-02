@@ -99,7 +99,7 @@ static av_cold int init_ralf_vlc(VLC *vlc, const uint8_t *data, int elems)
     for (i = 0; i < elems; i++)
         codes[i] = prefixes[lens[i]]++;
 
-    return ff_init_vlc_sparse(vlc, FFMIN(max_bits, 9), elems,
+    return ff_vlc_init_sparse(vlc, FFMIN(max_bits, 9), elems,
                               lens, 1, 1, codes, 2, 2, NULL, 0, 0, 0);
 }
 
@@ -109,16 +109,16 @@ static av_cold int decode_close(AVCodecContext *avctx)
     int i, j, k;
 
     for (i = 0; i < 3; i++) {
-        ff_free_vlc(&ctx->sets[i].filter_params);
-        ff_free_vlc(&ctx->sets[i].bias);
-        ff_free_vlc(&ctx->sets[i].coding_mode);
+        ff_vlc_free(&ctx->sets[i].filter_params);
+        ff_vlc_free(&ctx->sets[i].bias);
+        ff_vlc_free(&ctx->sets[i].coding_mode);
         for (j = 0; j < 10; j++)
             for (k = 0; k < 11; k++)
-                ff_free_vlc(&ctx->sets[i].filter_coeffs[j][k]);
+                ff_vlc_free(&ctx->sets[i].filter_coeffs[j][k]);
         for (j = 0; j < 15; j++)
-            ff_free_vlc(&ctx->sets[i].short_codes[j]);
+            ff_vlc_free(&ctx->sets[i].short_codes[j]);
         for (j = 0; j < 125; j++)
-            ff_free_vlc(&ctx->sets[i].long_codes[j]);
+            ff_vlc_free(&ctx->sets[i].long_codes[j]);
     }
 
     return 0;
@@ -523,7 +523,6 @@ const FFCodec ff_ralf_decoder = {
     .flush          = decode_flush,
     .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF |
                       AV_CODEC_CAP_DR1,
-    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
-                                                      AV_SAMPLE_FMT_NONE },
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16P),
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

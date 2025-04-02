@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "avcodec.h"
@@ -275,16 +276,13 @@ const FFCodec ff_sgi_encoder = {
     CODEC_LONG_NAME("SGI image"),
     .p.type    = AVMEDIA_TYPE_VIDEO,
     .p.id      = AV_CODEC_ID_SGI,
-    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(SgiContext),
     .p.priv_class = &sgi_class,
     .init      = encode_init,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .p.pix_fmts = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_RGB24, AV_PIX_FMT_RGBA,
-        AV_PIX_FMT_RGB48LE, AV_PIX_FMT_RGB48BE,
-        AV_PIX_FMT_RGBA64LE, AV_PIX_FMT_RGBA64BE,
-        AV_PIX_FMT_GRAY16LE, AV_PIX_FMT_GRAY16BE, AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_RGB24,    AV_PIX_FMT_RGBA,
+                  AV_PIX_FMT_RGB48LE,  AV_PIX_FMT_RGB48BE,
+                  AV_PIX_FMT_RGBA64LE, AV_PIX_FMT_RGBA64BE,
+                  AV_PIX_FMT_GRAY16LE, AV_PIX_FMT_GRAY16BE, AV_PIX_FMT_GRAY8),
 };

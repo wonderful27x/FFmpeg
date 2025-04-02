@@ -48,7 +48,7 @@ ALIGN 16
 
     sub       lenq, 64
     jge       .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse
@@ -141,7 +141,7 @@ cglobal vector_fmac_scalar, 4,4,5, dst, src, mul, len
 %endif ; mmsize
     sub    lenq, 64
     jge .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse
@@ -178,7 +178,7 @@ cglobal vector_fmul_scalar, 4,4,3, dst, src, mul, len
     mova  [dstq+lenq], m1
     sub    lenq, mmsize
     jge .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse
@@ -233,7 +233,7 @@ cglobal vector_dmac_scalar, 4,4,5, dst, src, mul, len
     movaps [dstq+lenq+3*mmsize], m4
     sub    lenq, mmsize*4
     jge .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse2
@@ -280,7 +280,7 @@ cglobal vector_dmul_scalar, 4,4,3, dst, src, mul, len
     movaps [dstq+lenq+mmsize], m2
     sub          lenq, 2*mmsize
     jge .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse2
@@ -323,7 +323,7 @@ cglobal vector_fmul_window, 5, 6, 6, dst, src0, src1, win, len, len1
     sub       len1q, mmsize
     add       lenq,  mmsize
     jl .loop
-    REP_RET
+    RET
 
 ;-----------------------------------------------------------------------------
 ; vector_fmul_add(float *dst, const float *src0, const float *src1,
@@ -352,7 +352,7 @@ ALIGN 16
 
     sub     lenq,   2*mmsize
     jge     .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse
@@ -401,7 +401,7 @@ ALIGN 16
     add     src1q, 2*mmsize
     sub     lenq,  2*mmsize
     jge     .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse
@@ -567,6 +567,58 @@ cglobal scalarproduct_float, 3,5,8, v1, v2, size, len, offset
 %endif
     RET
 
+;---------------------------------------------------------------------------------
+; double scalarproduct_double(const double *v1, const double *v2, size_t len)
+;---------------------------------------------------------------------------------
+%macro SCALARPRODUCT_DOUBLE 0
+cglobal scalarproduct_double, 3,3,8, v1, v2, offset
+    shl offsetq, 3
+    add     v1q, offsetq
+    add     v2q, offsetq
+    neg offsetq
+    xorpd    m0, m0
+    xorpd    m1, m1
+    movapd   m2, m0
+    movapd   m3, m1
+align 16
+.loop:
+    movapd   m4, [v1q+offsetq+mmsize*0]
+    movapd   m5, [v1q+offsetq+mmsize*1]
+    movapd   m6, [v1q+offsetq+mmsize*2]
+    movapd   m7, [v1q+offsetq+mmsize*3]
+    mulpd    m4, [v2q+offsetq+mmsize*0]
+    mulpd    m5, [v2q+offsetq+mmsize*1]
+    mulpd    m6, [v2q+offsetq+mmsize*2]
+    mulpd    m7, [v2q+offsetq+mmsize*3]
+    addpd    m0, m4
+    addpd    m1, m5
+    addpd    m2, m6
+    addpd    m3, m7
+    add offsetq, mmsize*4
+    jl .loop
+    addpd    m0, m1
+    addpd    m2, m3
+    addpd    m0, m2
+%if mmsize == 32
+    vextractf128 xm1, m0, 1
+    addpd   xm0, xm1
+%endif
+    movhlps xm1, xm0
+    addsd   xm0, xm1
+%if ARCH_X86_64 == 0
+    movsd   r0m, xm0
+    fld qword r0m
+%endif
+    RET
+%endmacro
+
+INIT_XMM sse2
+SCALARPRODUCT_DOUBLE
+%if HAVE_AVX_EXTERNAL
+INIT_YMM avx
+SCALARPRODUCT_DOUBLE
+%endif
+
 ;-----------------------------------------------------------------------------
 ; void ff_butterflies_float(float *src0, float *src1, int len);
 ;-----------------------------------------------------------------------------
@@ -585,4 +637,4 @@ cglobal butterflies_float, 3,3,3, src0, src1, len
     mova        [src0q + lenq], m0
     add       lenq, mmsize
     jl .loop
-    REP_RET
+    RET

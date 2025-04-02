@@ -32,7 +32,6 @@
 #include "drawutils.h"
 #include "filters.h"
 #include "formats.h"
-#include "internal.h"
 #include "audio.h"
 #include "video.h"
 
@@ -67,6 +66,7 @@ typedef struct AVSyncTestContext {
 #define OFFSET(x) offsetof(AVSyncTestContext, x)
 #define A AV_OPT_FLAG_AUDIO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
 #define V AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
+#define R AV_OPT_FLAG_RUNTIME_PARAM
 
 static const AVOption avsynctest_options[] = {
     {"size",       "set frame size",  OFFSET(w),            AV_OPT_TYPE_IMAGE_SIZE, {.str="hd720"},   0,   0, V },
@@ -75,14 +75,14 @@ static const AVOption avsynctest_options[] = {
     {"fr",         "set frame rate",  OFFSET(frame_rate),   AV_OPT_TYPE_VIDEO_RATE, {.str="30"},   0,INT_MAX, V },
     {"samplerate", "set sample rate", OFFSET(sample_rate),  AV_OPT_TYPE_INT,        {.i64=44100},8000,384000, A },
     {"sr",         "set sample rate", OFFSET(sample_rate),  AV_OPT_TYPE_INT,        {.i64=44100},8000,384000, A },
-    {"amplitude",  "set beep amplitude", OFFSET(amplitude), AV_OPT_TYPE_FLOAT,      {.dbl=.7},       0.,  1., A },
-    {"a",          "set beep amplitude", OFFSET(amplitude), AV_OPT_TYPE_FLOAT,      {.dbl=.7},       0.,  1., A },
+    {"amplitude",  "set beep amplitude", OFFSET(amplitude), AV_OPT_TYPE_FLOAT,      {.dbl=.7},       0.,  1., A|R },
+    {"a",          "set beep amplitude", OFFSET(amplitude), AV_OPT_TYPE_FLOAT,      {.dbl=.7},       0.,  1., A|R },
     {"period",     "set beep period", OFFSET(period),       AV_OPT_TYPE_INT,        {.i64=3},         1, 99., A },
     {"p",          "set beep period", OFFSET(period),       AV_OPT_TYPE_INT,        {.i64=3},         1, 99., A },
-    {"delay",      "set flash delay", OFFSET(delay),        AV_OPT_TYPE_INT,        {.i64=0},       -30,  30, V },
-    {"dl",         "set flash delay", OFFSET(delay),        AV_OPT_TYPE_INT,        {.i64=0},       -30,  30, V },
-    {"cycle",      "set delay cycle", OFFSET(cycle),        AV_OPT_TYPE_BOOL,       {.i64=0},         0,   1, V },
-    {"c",          "set delay cycle", OFFSET(cycle),        AV_OPT_TYPE_BOOL,       {.i64=0},         0,   1, V },
+    {"delay",      "set flash delay", OFFSET(delay),        AV_OPT_TYPE_INT,        {.i64=0},       -30,  30, V|R },
+    {"dl",         "set flash delay", OFFSET(delay),        AV_OPT_TYPE_INT,        {.i64=0},       -30,  30, V|R },
+    {"cycle",      "set delay cycle", OFFSET(cycle),        AV_OPT_TYPE_BOOL,       {.i64=0},         0,   1, V|R },
+    {"c",          "set delay cycle", OFFSET(cycle),        AV_OPT_TYPE_BOOL,       {.i64=0},         0,   1, V|R },
     {"duration",   "set duration",    OFFSET(duration),     AV_OPT_TYPE_DURATION,   {.i64=0},         0, INT64_MAX, V|A },
     {"d",          "set duration",    OFFSET(duration),     AV_OPT_TYPE_DURATION,   {.i64=0},         0, INT64_MAX, V|A },
     {"fg",         "set foreground color", OFFSET(rgba[0]), AV_OPT_TYPE_COLOR,      {.str="white"},   0,   0, V },
@@ -93,13 +93,18 @@ static const AVOption avsynctest_options[] = {
 
 AVFILTER_DEFINE_CLASS(avsynctest);
 
-static av_cold int query_formats(AVFilterContext *ctx)
+static av_cold int query_formats(const AVFilterContext *ctx,
+                                 AVFilterFormatsConfig **cfg_in,
+                                 AVFilterFormatsConfig **cfg_out)
 {
-    AVSyncTestContext *s = ctx->priv;
-    AVFilterChannelLayouts *chlayout = NULL;
+    const AVSyncTestContext *s = ctx->priv;
     int sample_rates[] = { s->sample_rate, -1 };
     static const enum AVSampleFormat sample_fmts[] = {
         AV_SAMPLE_FMT_S32, AV_SAMPLE_FMT_NONE
+    };
+    static const AVChannelLayout layouts[] = {
+        AV_CHANNEL_LAYOUT_MONO,
+        { .nb_channels = 0 },
     };
     AVFilterFormats *formats;
     int ret;
@@ -107,25 +112,20 @@ static av_cold int query_formats(AVFilterContext *ctx)
     formats = ff_make_format_list(sample_fmts);
     if (!formats)
         return AVERROR(ENOMEM);
-    if ((ret = ff_formats_ref(formats, &ctx->outputs[0]->incfg.formats)) < 0)
+    if ((ret = ff_formats_ref(formats, &cfg_out[0]->formats)) < 0)
         return ret;
 
     formats = ff_draw_supported_pixel_formats(0);
     if (!formats)
         return AVERROR(ENOMEM);
-    if ((ret = ff_formats_ref(formats, &ctx->outputs[1]->incfg.formats)) < 0)
+    if ((ret = ff_formats_ref(formats, &cfg_out[1]->formats)) < 0)
         return ret;
 
-    if ((ret = ff_add_channel_layout(&chlayout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_MONO)) < 0)
-        return ret;
-    ret = ff_set_common_channel_layouts(ctx, chlayout);
+    ret = ff_set_common_channel_layouts_from_list2(ctx, cfg_in, cfg_out, layouts);
     if (ret < 0)
         return ret;
 
-    formats = ff_make_format_list(sample_rates);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    return ff_set_common_samplerates(ctx, formats);
+    return ff_set_common_samplerates_from_list2(ctx, cfg_in, cfg_out, sample_rates);
 }
 
 static av_cold int aconfig_props(AVFilterLink *outlink)
@@ -144,13 +144,15 @@ static av_cold int aconfig_props(AVFilterLink *outlink)
 
 static av_cold int config_props(AVFilterLink *outlink)
 {
+    FilterLink *l = ff_filter_link(outlink);
     AVFilterContext *ctx = outlink->src;
     AVSyncTestContext *s = ctx->priv;
+    int ret;
 
     outlink->w = s->w;
     outlink->h = s->h;
     outlink->time_base = av_inv_q(s->frame_rate);
-    outlink->frame_rate = s->frame_rate;
+    l->frame_rate = s->frame_rate;
     outlink->sample_aspect_ratio = (AVRational) {1, 1};
     s->delay_min = av_mul_q(s->frame_rate, av_make_q(-1, 2));
     s->delay_max = av_mul_q(s->delay_min, av_make_q(-1, 1));
@@ -159,7 +161,11 @@ static av_cold int config_props(AVFilterLink *outlink)
     s->dir = 1;
     s->prev_intpart = INT64_MIN;
 
-    ff_draw_init(&s->draw, outlink->format, 0);
+    ret = ff_draw_init2(&s->draw, outlink->format, outlink->colorspace, outlink->color_range, 0);
+    if (ret < 0) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to initialize FFDrawContext\n");
+        return ret;
+    }
 
     ff_draw_color(&s->draw, &s->fg, s->rgba[0]);
     ff_draw_color(&s->draw, &s->bg, s->rgba[1]);
@@ -170,7 +176,7 @@ static av_cold int config_props(AVFilterLink *outlink)
 
 #define FPI 0x8000
 
-static int32_t sin32(int32_t x, int shift)
+static int32_t sin32(int32_t x, AVRational scale)
 {
     const double pi = M_PI;
     const int32_t a = ((2.0 * pi) * (1 << 24));
@@ -194,7 +200,8 @@ static int32_t sin32(int32_t x, int shift)
     result = a + t2;
     result *= x;
     result += (1U << 31);
-    result >>= (32 - shift);
+    result >>= 17;
+    result = av_rescale(result, scale.num, scale.den);
 
     return result;
 }
@@ -203,7 +210,7 @@ static int audio_frame(AVFilterLink *outlink)
 {
     AVFilterContext *ctx = outlink->src;
     AVSyncTestContext *s = ctx->priv;
-    const int a = lrintf(s->amplitude * 15);
+    const AVRational a = av_d2q(s->amplitude, 32768);
     int64_t duration[2];
     int64_t delta;
     AVFrame *out;
@@ -276,6 +283,9 @@ static int video_frame(AVFilterLink *outlink)
     int new_offset;
     int64_t delta, temp, intpart;
     AVFrame *out;
+
+    if (!s->cycle)
+        s->vdelay = av_make_q(s->delay, 1);
 
     delta = av_rescale_q(s->apts, s->frame_rate, av_make_q(s->sample_rate, 1)) - s->vpts;
     if (delta < 0)
@@ -391,13 +401,13 @@ static const AVFilterPad avsynctest_outputs[] = {
     },
 };
 
-const AVFilter ff_avsrc_avsynctest = {
-    .name          = "avsynctest",
-    .description   = NULL_IF_CONFIG_SMALL("Generate an Audio Video Sync Test."),
+const FFFilter ff_avsrc_avsynctest = {
+    .p.name        = "avsynctest",
+    .p.description = NULL_IF_CONFIG_SMALL("Generate an Audio Video Sync Test."),
+    .p.priv_class  = &avsynctest_class,
     .priv_size     = sizeof(AVSyncTestContext),
-    .priv_class    = &avsynctest_class,
-    .inputs        = NULL,
     .activate      = activate,
     FILTER_OUTPUTS(avsynctest_outputs),
-    FILTER_QUERY_FUNC(query_formats),
+    FILTER_QUERY_FUNC2(query_formats),
+    .process_command = ff_filter_process_command,
 };

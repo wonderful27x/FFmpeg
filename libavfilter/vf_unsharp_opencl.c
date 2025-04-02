@@ -23,7 +23,7 @@
 #include "libavutil/pixdesc.h"
 
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
 #include "opencl.h"
 #include "opencl_source.h"
 #include "video.h"
@@ -59,7 +59,7 @@ typedef struct UnsharpOpenCLContext {
         cl_int   size_y;
         cl_float amount;
         cl_float threshold;
-    } plane[4];
+    } plane[AV_VIDEO_MAX_PLANES];
 } UnsharpOpenCLContext;
 
 
@@ -69,7 +69,7 @@ static int unsharp_opencl_init(AVFilterContext *avctx)
     cl_int cle;
     int err;
 
-    err = ff_opencl_filter_load_program(avctx, &ff_opencl_source_unsharp, 1);
+    err = ff_opencl_filter_load_program(avctx, &ff_source_unsharp_cl, 1);
     if (err < 0)
         goto fail;
 
@@ -396,11 +396,12 @@ static const AVFilterPad unsharp_opencl_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_unsharp_opencl = {
-    .name           = "unsharp_opencl",
-    .description    = NULL_IF_CONFIG_SMALL("Apply unsharp mask to input video"),
+const FFFilter ff_vf_unsharp_opencl = {
+    .p.name         = "unsharp_opencl",
+    .p.description  = NULL_IF_CONFIG_SMALL("Apply unsharp mask to input video"),
+    .p.priv_class   = &unsharp_opencl_class,
+    .p.flags        = AVFILTER_FLAG_HWDEVICE,
     .priv_size      = sizeof(UnsharpOpenCLContext),
-    .priv_class     = &unsharp_opencl_class,
     .init           = &ff_opencl_filter_init,
     .uninit         = &unsharp_opencl_uninit,
     FILTER_INPUTS(unsharp_opencl_inputs),

@@ -437,7 +437,7 @@ static int smc_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     if ((ret = ff_reget_buffer(avctx, s->frame, 0)) < 0)
         return ret;
 
-    s->frame->palette_has_changed = ff_copy_palette(s->pal, avpkt, avctx);
+    ff_copy_palette(s->pal, avpkt, avctx);
 
     bytestream2_init(&gb, buf, buf_size);
     ret = smc_decode_stream(s, &gb);

@@ -249,7 +249,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *p,
                 }
                 break;
             }
-            p->palette_has_changed = 1;
         }
     }
 

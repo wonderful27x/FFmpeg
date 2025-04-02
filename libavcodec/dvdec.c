@@ -36,6 +36,7 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/emms.h"
 #include "libavutil/internal.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/thread.h"
@@ -158,15 +159,15 @@ static av_cold void dv_init_static(void)
 
     /* it's faster to include sign bit in a generic VLC parsing scheme */
     for (i = 0, j = 0; i < NB_DV_VLC; i++, j++) {
-        tmp[j].len   = ff_dv_vlc_len[i];
+        tmp[j].len8  = ff_dv_vlc_len[i];
         tmp[j].run   = ff_dv_vlc_run[i];
         tmp[j].level = ff_dv_vlc_level[i];
 
         if (ff_dv_vlc_level[i]) {
-            tmp[j].len++;
+            tmp[j].len8++;
 
             j++;
-            tmp[j].len   =  ff_dv_vlc_len[i] + 1;
+            tmp[j].len8  =  ff_dv_vlc_len[i] + 1;
             tmp[j].run   =  ff_dv_vlc_run[i];
             tmp[j].level = -ff_dv_vlc_level[i];
         }
@@ -174,9 +175,9 @@ static av_cold void dv_init_static(void)
 
     /* NOTE: as a trick, we use the fact the no codes are unused
      * to accelerate the parsing of partial codes */
-    ff_init_vlc_from_lengths(&dv_vlc, TEX_VLC_BITS, j,
-                             &tmp[0].len, sizeof(tmp[0]),
-                             NULL, 0, 0, 0, INIT_VLC_USE_NEW_STATIC, NULL);
+    ff_vlc_init_from_lengths(&dv_vlc, TEX_VLC_BITS, j,
+                             &tmp[0].len8, sizeof(tmp[0]),
+                             NULL, 0, 0, 0, VLC_INIT_USE_STATIC, NULL);
     av_assert1(dv_vlc.table_size == 1664);
 
     for (int i = 0; i < dv_vlc.table_size; i++) {
@@ -192,7 +193,7 @@ static av_cold void dv_init_static(void)
             run   = tmp[code].run + 1;
             level = tmp[code].level;
         }
-        dv_rl_vlc[i].len   = len;
+        dv_rl_vlc[i].len8  = len;
         dv_rl_vlc[i].level = level;
         dv_rl_vlc[i].run   = run;
     }
@@ -300,7 +301,7 @@ static void dv_decode_ac(GetBitContext *gb, BlockInfo *mb, int16_t *block)
                 pos, SHOW_UBITS(re, gb, 16), re_index);
         /* our own optimized GET_RL_VLC */
         index   = NEG_USR32(re_cache, TEX_VLC_BITS);
-        vlc_len = dv_rl_vlc[index].len;
+        vlc_len = dv_rl_vlc[index].len8;
         if (vlc_len < 0) {
             index = NEG_USR32((unsigned) re_cache << TEX_VLC_BITS, -vlc_len) +
                     dv_rl_vlc[index].level;
@@ -345,7 +346,7 @@ static inline void bit_copy(PutBitContext *pb, GetBitContext *gb)
         put_bits(pb, bits_left, get_bits(gb, bits_left));
 }
 
-static av_always_inline void put_block_8x4(int16_t *block, uint8_t *av_restrict p, int stride)
+static av_always_inline void put_block_8x4(int16_t *block, uint8_t *restrict p, int stride)
 {
     int i, j;
 
@@ -636,20 +637,17 @@ static int dvvideo_decode_frame(AVCodecContext *avctx, AVFrame *frame,
     }
 
     if (sys != s->sys) {
-        ret = ff_dv_init_dynamic_tables(s->work_chunks, sys);
-        if (ret < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Error initializing the work tables.\n");
-            return ret;
-        }
+        ff_dv_init_dynamic_tables(s->work_chunks, sys);
         dv_init_weight_tables(s, sys);
         s->sys = sys;
     }
 
     s->frame            = frame;
-    frame->key_frame    = 1;
-    frame->pict_type    = AV_PICTURE_TYPE_I;
     avctx->pix_fmt      = s->sys->pix_fmt;
     avctx->framerate    = av_inv_q(s->sys->time_base);
+    avctx->bit_rate     = av_rescale_q(s->sys->frame_size,
+                                       (AVRational) { 8, 1 },
+                                       s->sys->time_base);
 
     ret = ff_set_dimensions(avctx, s->sys->width, s->sys->height);
     if (ret < 0)
@@ -670,14 +668,14 @@ static int dvvideo_decode_frame(AVCodecContext *avctx, AVFrame *frame,
     /* Determine the codec's field order from the packet */
     if ( *vsc_pack == DV_VIDEO_CONTROL ) {
         if (avctx->height == 720) {
-            frame->interlaced_frame = 0;
-            frame->top_field_first = 0;
+            frame->flags &= ~AV_FRAME_FLAG_INTERLACED;
+            frame->flags &= ~AV_FRAME_FLAG_TOP_FIELD_FIRST;
         } else if (avctx->height == 1080) {
-            frame->interlaced_frame = 1;
-            frame->top_field_first = (vsc_pack[3] & 0x40) == 0x40;
+            frame->flags |= AV_FRAME_FLAG_INTERLACED;
+            frame->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST * ((vsc_pack[3] & 0x40) == 0x40);
         } else {
-            frame->interlaced_frame = (vsc_pack[3] & 0x10) == 0x10;
-            frame->top_field_first = !(vsc_pack[3] & 0x40);
+            frame->flags |= AV_FRAME_FLAG_INTERLACED * ((vsc_pack[3] & 0x10) == 0x10);
+            frame->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST * !(vsc_pack[3] & 0x40);
         }
     }
 

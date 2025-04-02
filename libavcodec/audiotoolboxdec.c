@@ -32,6 +32,7 @@
 #include "mpegaudiodecheader.h"
 #include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/log.h"
 
@@ -71,10 +72,12 @@ static UInt32 ffat_get_format_id(enum AVCodecID codec, int profile)
         return kAudioFormatAMR;
     case AV_CODEC_ID_EAC3:
         return kAudioFormatEnhancedAC3;
+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     case AV_CODEC_ID_GSM_MS:
         return kAudioFormatMicrosoftGSM;
     case AV_CODEC_ID_ILBC:
         return kAudioFormatiLBC;
+#endif
     case AV_CODEC_ID_MP1:
         return kAudioFormatMPEGLayer1;
     case AV_CODEC_ID_MP2:
@@ -538,6 +541,8 @@ static int ffat_decode(AVCodecContext *avctx, AVFrame *frame,
     frame->sample_rate = avctx->sample_rate;
 
     frame->nb_samples = avctx->frame_size;
+
+    frame->flags |= AV_FRAME_FLAG_KEY;
 
     out_buffers.mBuffers[0].mData = at->decoded_data;
 

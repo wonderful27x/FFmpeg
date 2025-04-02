@@ -537,8 +537,7 @@ static int qtrle_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     }
 
     if(has_palette) {
-        s->frame->palette_has_changed = ff_copy_palette(s->pal, avpkt, avctx);
-
+        ff_copy_palette(s->pal, avpkt, avctx);
         /* make the palette available on the way out */
         memcpy(s->frame->data[1], s->pal, AVPALETTE_SIZE);
     }

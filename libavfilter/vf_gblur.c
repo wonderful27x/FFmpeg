@@ -28,12 +28,12 @@
 #include <float.h>
 
 #include "libavutil/imgutils.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "formats.h"
+#include "filters.h"
 #include "gblur.h"
-#include "internal.h"
 #include "vf_gblur_init.h"
 #include "video.h"
 
@@ -74,7 +74,6 @@ static int filter_horizontally(AVFilterContext *ctx, void *arg, int jobnr, int n
 
     s->horiz_slice(buffer + width * slice_start, width, slice_end - slice_start,
                    steps, nu, boundaryscale, localbuf);
-    emms_c();
     return 0;
 }
 
@@ -315,22 +314,15 @@ static const AVFilterPad gblur_inputs[] = {
     },
 };
 
-static const AVFilterPad gblur_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
-const AVFilter ff_vf_gblur = {
-    .name          = "gblur",
-    .description   = NULL_IF_CONFIG_SMALL("Apply Gaussian Blur filter."),
+const FFFilter ff_vf_gblur = {
+    .p.name        = "gblur",
+    .p.description = NULL_IF_CONFIG_SMALL("Apply Gaussian Blur filter."),
+    .p.priv_class  = &gblur_class,
+    .p.flags       = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
     .priv_size     = sizeof(GBlurContext),
-    .priv_class    = &gblur_class,
     .uninit        = uninit,
     FILTER_INPUTS(gblur_inputs),
-    FILTER_OUTPUTS(gblur_outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_PIXFMTS_ARRAY(pix_fmts),
-    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
     .process_command = ff_filter_process_command,
 };

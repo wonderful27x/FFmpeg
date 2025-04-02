@@ -63,7 +63,6 @@ static int set_palette(BethsoftvidContext *ctx, GetByteContext *g)
         palette[a] = 0xFFU << 24 | bytestream2_get_be24u(g) * 4;
         palette[a] |= palette[a] >> 6 & 0x30303;
     }
-    ctx->frame->palette_has_changed = 1;
     return 0;
 }
 

@@ -28,7 +28,7 @@
 
 
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
 #include "opencl.h"
 #include "opencl_source.h"
 #include "video.h"
@@ -42,7 +42,7 @@ typedef struct NeighborOpenCLContext {
 
     char *matrix_str[4];
 
-    cl_float threshold[4];
+    cl_float threshold[AV_VIDEO_MAX_PLANES];
     cl_int coordinates;
     cl_mem coord;
 
@@ -55,7 +55,7 @@ static int neighbor_opencl_init(AVFilterContext *avctx)
     cl_int cle;
     int err;
 
-    err = ff_opencl_filter_load_program(avctx, &ff_opencl_source_neighbor, 1);
+    err = ff_opencl_filter_load_program(avctx, &ff_source_neighbor_cl, 1);
     if (err < 0)
         goto fail;
 
@@ -93,7 +93,7 @@ static int neighbor_opencl_make_filter_params(AVFilterContext *avctx)
     cl_int cle;
     int i;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < AV_VIDEO_MAX_PLANES; i++) {
         ctx->threshold[i] /= 255.0;
     }
 
@@ -273,11 +273,11 @@ static const AVOption erosion_opencl_options[] = {
 
 AVFILTER_DEFINE_CLASS(erosion_opencl);
 
-const AVFilter ff_vf_erosion_opencl = {
-    .name           = "erosion_opencl",
-    .description    = NULL_IF_CONFIG_SMALL("Apply erosion effect"),
+const FFFilter ff_vf_erosion_opencl = {
+    .p.name         = "erosion_opencl",
+    .p.description  = NULL_IF_CONFIG_SMALL("Apply erosion effect"),
+    .p.priv_class   = &erosion_opencl_class,
     .priv_size      = sizeof(NeighborOpenCLContext),
-    .priv_class     = &erosion_opencl_class,
     .init           = &ff_opencl_filter_init,
     .uninit         = &neighbor_opencl_uninit,
     FILTER_INPUTS(neighbor_opencl_inputs),
@@ -301,11 +301,12 @@ static const AVOption dilation_opencl_options[] = {
 
 AVFILTER_DEFINE_CLASS(dilation_opencl);
 
-const AVFilter ff_vf_dilation_opencl = {
-    .name           = "dilation_opencl",
-    .description    = NULL_IF_CONFIG_SMALL("Apply dilation effect"),
+const FFFilter ff_vf_dilation_opencl = {
+    .p.name         = "dilation_opencl",
+    .p.description  = NULL_IF_CONFIG_SMALL("Apply dilation effect"),
+    .p.priv_class   = &dilation_opencl_class,
+    .p.flags        = AVFILTER_FLAG_HWDEVICE,
     .priv_size      = sizeof(NeighborOpenCLContext),
-    .priv_class     = &dilation_opencl_class,
     .init           = &ff_opencl_filter_init,
     .uninit         = &neighbor_opencl_uninit,
     FILTER_INPUTS(neighbor_opencl_inputs),
